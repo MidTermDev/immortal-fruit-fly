@@ -2,21 +2,22 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CFG } from "@/lib/config";
-import { Chain } from "@/lib/chain";
-import { FlyRecord, RegistryInfo, Ev, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName } from "@/lib/registry";
+import { Chain, LogScan } from "@/lib/chain";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName, isCoreOnlyBody, scanLabel } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
 
 const PAGE = 24;
+const EVENTS_BLOCKS = 60000;
 
-export function FlyCard({ f, meta }: { f: FlyRecord; meta?: any }) {
-  const s = status(f);
+export function FlyCard({ f, meta, names }: { f: FlyRecord; meta?: any; names?: Record<string, string> }) {
+  const s = status(f, names);
   return (
     <Link href={`/fly/?id=${f.id}`} className={`fly-card ${s.key}`}>
       <div className="portrait">{meta?.image ? <img src={ipfs(meta.image)} alt={`Portrait of ${f.name}`} loading="lazy" /> : <span className="lbl">portrait pending</span>}</div>
       <div className="fc-b">
         <div className="fc-t"><span className="mono">#{pad(f.id)}</span><span className={`pill ${s.key}`}>{s.label}</span></div>
         <b>{f.name || `Fly #${f.id}`}</b>
-        <span className="fc-m">{f.alive ? (f.body !== "0x0000000000000000000000000000000000000000" ? `in ${bodyName(f.body)} · ${hms(f.energy)} at last checkpoint` : `${hms(f.energy)} banked`) : `died ${f.deaths}× · gen ${f.generation}`}</span>
+        <span className="fc-m">{f.alive ? (f.body !== ZERO ? `in ${bodyName(f.body, names)}${isCoreOnlyBody(f.body) ? " (core only)" : ""} · ${hms(f.energy)} at last checkpoint` : `${hms(f.energy)} banked`) : `died ${f.deaths}× · gen ${f.generation}`}</span>
         <span className="fc-m dim">gen {f.generation} · step {fmt(f.brainStep)} · {f.parentA ? `child of #${f.parentA} × #${f.parentB}` : "genesis"}</span>
       </div>
     </Link>
@@ -30,6 +31,9 @@ export default function Collection() {
   const [metas, setMetas] = useState<Record<number, any>>({});
   const [page, setPage] = useState(0);
   const [events, setEvents] = useState<Ev[]>([]);
+  const [scan, setScan] = useState<LogScan | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const looked = useRef(new Set<string>());
   const [wallet, setWallet] = useState<string | null>(null);
   const [bal, setBal] = useState("");
   const [mine, setMine] = useState<number[]>([]);
@@ -40,10 +44,18 @@ export default function Collection() {
   const tt = useRef<any>(null);
   const setToast = (m: string, ms = 6000) => { setT(m); clearTimeout(tt.current); tt.current = setTimeout(() => setT(null), ms); };
 
+  /** Names of bodies other than the arena and DOOM (pebbles register as "Pebble N"): one bodies() call per new address, cached. */
+  const learnNames = async (ch: Chain, addrs: Iterable<string>) => {
+    const todo = new Set<string>(); for (const a of addrs) { const l = String(a || "").toLowerCase(); if (l && l !== ZERO && isCoreOnlyBody(l) && !looked.current.has(l)) todo.add(l); }
+    const found: Record<string, string> = {};
+    for (const a of todo) { looked.current.add(a); try { const b = await ch.bodyInfo(a); if (b.name) found[a] = b.name; } catch {} }
+    if (Object.keys(found).length) setNames((o) => ({ ...o, ...found }));
+  };
   const loadPage = async (ch: Chain, total: number, p: number) => {
     const ids: number[] = []; for (let i = total - p * PAGE; i > Math.max(0, total - (p + 1) * PAGE); i--) ids.push(i);
     const recs = (await Promise.all(ids.map((i) => ch.flyRecord(i).catch(() => null)))).filter(Boolean) as FlyRecord[];
     setFlies(recs);
+    learnNames(ch, recs.flatMap((f) => [f.body, f.pendingBody])).catch(() => {});
     recs.forEach(async (f) => { if (f.uri && f.uri.startsWith("ipfs://")) { const m = await ch.metadataOf(f.uri); if (m) setMetas((o) => ({ ...o, [f.id]: m })); } });
   };
   useEffect(() => {
@@ -52,7 +64,8 @@ export default function Collection() {
         const ch = await new Chain().connectRead(); chainRef.current = ch;
         const ri = await ch.registryInfo(); setInfo(ri);
         await loadPage(ch, ri.total, 0);
-        setEvents(await ch.registryEvents(60000));
+        const { events: evs, scan: sc } = await ch.registryEvents(EVENTS_BLOCKS); setEvents(evs); setScan(sc);
+        learnNames(ch, evs.map((e) => e.args.body).filter(Boolean)).catch(() => {});
       } catch (e: any) { setErr("Could not reach BNB Smart Chain: " + (e.shortMessage || e.message)); }
     })();
     return () => clearTimeout(tt.current);
@@ -116,11 +129,11 @@ export default function Collection() {
           </div>
 
           <div className="log-head" style={{ marginBottom: 18 }}><b style={{ fontSize: 13 }}>Specimens</b><span className="lbl">newest first</span>{pages > 1 && <span className="lbl" style={{ marginLeft: "auto" }}><button className="btn sm plain" disabled={page === 0} onClick={() => setPage(page - 1)}>← newer</button> page {page + 1} / {pages} <button className="btn sm plain" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>older →</button></span>}</div>
-          <div className="flies-grid">{flies.length ? flies.map((f) => <FlyCard key={f.id} f={f} meta={metas[f.id]} />) : <div className="lbl" style={{ padding: "20px 0" }}>{err ? "" : info && info.total === 0 ? "no flies yet" : "reading the registry…"}</div>}</div>
+          <div className="flies-grid">{flies.length ? flies.map((f) => <FlyCard key={f.id} f={f} meta={metas[f.id]} names={names} />) : <div className="lbl" style={{ padding: "20px 0" }}>{err ? "" : info && info.total === 0 ? "no flies yet" : "reading the registry…"}</div>}</div>
 
           <div style={{ marginTop: 44 }}>
-            <div className="log-head"><b style={{ fontSize: 13 }}>Species record</b><span className="lbl">everything that happened to every fly · newest first</span></div>
-            <RecordList events={events} max={80} showId />
+            <div className="log-head"><b style={{ fontSize: 13 }}>Species record</b><span className="lbl">everything that happened to every fly · newest first · {events.length} events {scanLabel(scan, EVENTS_BLOCKS)}</span></div>
+            <RecordList events={events} names={names} max={80} showId empty={err ? "" : !scan ? "reading BNB Smart Chain…" : scan.complete ? `nothing happened to any fly ${scanLabel(scan, EVENTS_BLOCKS)}` : `nothing since block ${fmt(scan.from)}; the public RPCs would not serve older blocks right now`} />
           </div>
         </div>
       </section>

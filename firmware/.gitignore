@@ -1,0 +1,3 @@
+# build output and the one file that must never be committed
+.pio/
+include/secrets.h

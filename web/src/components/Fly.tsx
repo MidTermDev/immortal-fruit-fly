@@ -7,6 +7,7 @@ import params from "@/data/params.json";
 import { CFG } from "@/lib/config";
 import { Circuit, FlySim, CH, COS16, SIN16, WEDGES } from "@/lib/flysim";
 import { Chain } from "@/lib/chain";
+import { drawDial as drawDialRing, wedgeAt } from "@/lib/dial";
 
 const fmt = (n: number | bigint) => Number(n).toLocaleString("en-US");
 const short = (a?: string | null) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "—");
@@ -109,29 +110,8 @@ export default function Fly() {
       g.fillText("155 neurons", 0, 0); g.restore();
     };
 
-    const drawDial = () => {
-      const c = dialRef.current; if (!c) return; const g = c.getContext("2d")!;
-      const r = c.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
-      const css = Math.max(1, Math.floor(Math.min(r.width, r.height, 300)));
-      if (c.style.width !== css + "px") { c.style.width = css + "px"; c.style.height = css + "px"; }
-      const S = Math.max(1, Math.round(css * dpr)); if (c.width !== S) { c.width = S; c.height = S; }
-      const cx = S / 2, R = S * 0.39, r0 = S * 0.24; g.clearRect(0, 0, S, S);
-      const hm = Math.max(1, ...sim.hist);
-      for (let w = 0; w < WEDGES; w++) {
-        const a0 = (w * 2 * Math.PI) / WEDGES, a1 = a0 + (2 * Math.PI) / WEDGES - 0.03, act = Math.min(1, wedgeAct.current[w] / 2);
-        g.beginPath(); g.arc(cx, cx, R, -a1, -a0, false); g.arc(cx, cx, r0, -a0, -a1, true); g.closePath();
-        g.fillStyle = `rgba(240,180,41,${0.055 + act * 0.85})`; g.fill();
-        if (act > 0.55) { g.fillStyle = `rgba(255,90,53,${(act - 0.55) * 1.5})`; g.fill(); }
-        g.beginPath(); g.arc(cx, cx, R + S * 0.035, -a1, -a0, false); g.arc(cx, cx, R + S * 0.013, -a0, -a1, true); g.closePath();
-        g.fillStyle = `rgba(88,196,245,${0.07 + 0.6 * ((sim.hist[w] || 0) / hm)})`; g.fill();
-      }
-      g.save(); g.translate(cx, cx); g.rotate(-head.current.a);
-      g.beginPath(); g.moveTo(0, -S * 0.01); g.lineTo(r0 * (0.35 + 0.65 * head.current.m), 0); g.lineTo(0, S * 0.01); g.closePath();
-      g.fillStyle = "#e8e6e0"; g.fill(); g.restore();
-      g.beginPath(); g.arc(cx, cx, S * 0.015, 0, 7); g.fillStyle = "#ff5a35"; g.fill();
-      g.fillStyle = "rgba(232,230,224,0.4)"; g.font = `${Math.round(S * 0.036)}px ui-monospace, monospace`; g.textAlign = "center"; g.textBaseline = "middle";
-      for (let w = 0; w < WEDGES; w += 4) { const a = ((w + 0.5) * 2 * Math.PI) / WEDGES; g.fillText(String(w), cx + Math.cos(a) * S * 0.458, cx - Math.sin(a) * S * 0.458); }
-    };
+    // the dial itself lives in lib/dial.ts so the per-fly core figure (Core.tsx) draws the identical ring
+    const drawDial = () => { const c = dialRef.current; if (c) drawDialRing(c, wedgeAct.current.map((a) => Math.min(1, a / 2)), sim.hist, head.current.a, head.current.m); };
 
     const drawWalk = () => {
       const c = walkRef.current; if (!c) return; const g = c.getContext("2d")!; const { W, H, dpr } = fit(c);
@@ -187,7 +167,7 @@ export default function Fly() {
 
     const applyChain = (s: any) => { sim.loadState(s); sim.totalSpikes = 0; csRef.current = s; trailRef.current.length = 0; pushTrail(); };
     const loadEvents = async () => {
-      const ch = chainRef.current!; const evs = await ch.recentEvents(40000); setEvents(evs.slice(0, 60));
+      const ch = chainRef.current!; const { events: evs } = await ch.recentEvents(40000); setEvents(evs.slice(0, 60));
       const ticks = evs.filter((e) => e.name === "Ticked").reverse();
       if (ticks.length) { trailRef.current.length = 0; for (const t of ticks) trailRef.current.push([Number(t.args.posX) / 256, Number(t.args.posY) / 256]); pushTrail(); }
       const cs = csRef.current; if (cs?.lineageLength) setLineage(await ch.readLineage(cs.lineageLength));
@@ -232,11 +212,7 @@ export default function Fly() {
     try { const a = await chainRef.current!.connectWallet(); setWallet(a); setBal(fmtTok(await chainRef.current!.balance()) + " FLY"); setToast(`Connected ${short(a)}`); }
     catch (e: any) { setToast(e.shortMessage || e.message, 6000); }
   };
-  const dialClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const r = (e.target as HTMLCanvasElement).getBoundingClientRect();
-    const x = e.clientX - r.left - r.width / 2, y = -(e.clientY - r.top - r.height / 2);
-    setWedge(((Math.floor(Math.atan2(y, x) / ((2 * Math.PI) / WEDGES)) % WEDGES) + WEDGES) % WEDGES);
-  };
+  const dialClick = (e: React.MouseEvent<HTMLCanvasElement>) => setWedge(wedgeAt(e));
   const stimCost = prices ? fmtTok(prices.stimPrice * BigInt(strength)) : String(100 * strength);
   const poke = (label: string, ch: number, param: number, cls: string, hint: string) => (
     <button className={`poke ${cls}`} disabled={!!busy} onClick={() => act(label, () => chainRef.current!.stimulate(ch, param, strength, 16), () => sim().stimulate(ch, param, strength))}>

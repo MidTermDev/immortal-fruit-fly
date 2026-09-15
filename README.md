@@ -73,7 +73,8 @@ Siyuan's reply to that (quoted by CZ: *"immortal fruit flies on BNB Chain"*) nam
 | Arena body | [`0x47005543c06246124480D196a275327325695BEd`](https://bscscan.com/address/0x47005543c06246124480D196a275327325695BEd) |
 | DOOM body | [`0x642ebC7fD62a24406d8A86885F0131472E641c86`](https://bscscan.com/address/0x642ebC7fD62a24406d8A86885F0131472E641c86) |
 | `$FLY` token | [`0x23791aa3b031659b593cf141a2bc76b0ad657777`](https://bscscan.com/token/0x23791aa3b031659b593cf141a2bc76b0ad657777) |
-| `FlyBrain` v2 (the on-chain compass core) | [`0xee80f8cB5309C572343c38b5D717283BBBb517c5`](https://bscscan.com/address/0xee80f8cB5309C572343c38b5D717283BBBb517c5) |
+| `FlyCore` (every fly's on-chain compass core, keyed by token id; pebbles anchor here) | [`0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3`](https://bscscan.com/address/0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3) |
+| `FlyBrain` v2 (the first on-chain compass core, fly #1's until it was seeded into FlyCore) | [`0xee80f8cB5309C572343c38b5D717283BBBb517c5`](https://bscscan.com/address/0xee80f8cB5309C572343c38b5D717283BBBb517c5) |
 | circuit table v2 (SSTORE2 data contract) | [`0x2eE3C5168CD3F60E87693716E660470011EA9C7e`](https://bscscan.com/address/0x2eE3C5168CD3F60E87693716E660470011EA9C7e) |
 | `FlyWorld` (fly #1's arena before the registry; read-only history) | [`0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4`](https://bscscan.com/address/0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4) |
 | `FlyArcade` (fly #1's DOOM session 5; read-only history) | [`0x3dE4fe3535dd9E1CC17b6718B985593e3E463279`](https://bscscan.com/address/0x3dE4fe3535dd9E1CC17b6718B985593e3E463279) |
@@ -122,6 +123,10 @@ brain/run.sh                                  # the arena body: live server + pu
 | `stimulate(TURN_LEFT / TURN_RIGHT, …)` | drive the PEN neurons: the bump rotates, the fly turns | burned |
 | `stimulate(SHOCK, …)` | drive the Δ7 neurons: global inhibition, the bump collapses | burned |
 | `resurrect(extraFood)` | bring it back | 100,000 $FLY + food, burned |
+
+## Pebbles
+
+Five handheld devices (M5Stack CoreS3), each a wallet that owns a fly and the **body** that runs its neurons: the fly's per-fly on-chain compass core (`contracts/src/FlyCore.sol`, the FlyBrain v2 kernel keyed by registry id), turned by the gyroscope, cued by magnets over hall sensors, and anchored on-chain every 45 s by `stimulate` + `tick(16)` transactions the pebble signs itself. While a fly is in a pebble the whole-brain snapshot is preserved unchanged ("core only: the whole brain sleeps" on its page). The demo script, architecture, wiring, gas budget and bring-up checklist are in [HARDWARE.md](HARDWARE.md); the site version is at `/docs/pebbles/`. `FlyCore` is live at `0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3`; every fly page shows its on-chain core.
 
 ## Token
 

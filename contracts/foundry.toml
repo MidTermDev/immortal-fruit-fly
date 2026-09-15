@@ -7,6 +7,9 @@ evm_version = "cancun"
 optimizer = true
 optimizer_runs = 10_000
 via_ir = true
+# every top-level call in a test runs as its own transaction: gas figures (test_gas_*) are what a
+# receipt reports (21k + calldata, cold storage, clean slots), and vm.cool is not needed
+isolate = true
 fs_permissions = [{ access = "read", path = "./data" }, { access = "read", path = "../brain/identity.json" }, { access = "read", path = "../brand/collection_cid.txt" }]
 
 [rpc_endpoints]

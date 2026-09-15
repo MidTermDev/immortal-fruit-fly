@@ -1,7 +1,22 @@
 // @ts-nocheck
 import { ethers } from "ethers";
 import { CFG } from "./config";
+import type { Ev } from "./registry";
 import REGISTRY_ABI from "@/data/registry.abi.json";
+import CORE_ABI from "@/data/core.abi.json";
+
+/** How far back an event scan actually reached. `complete` is false when no endpoint would serve the older blocks;
+ *  `from` is then the oldest block that was read, so the UI can say "since block N" instead of pretending. */
+export type LogScan = { from: number; to: number; complete: boolean; floor: number };
+export type EventScan = { events: Ev[]; scan: LogScan };
+type LogEndpoint = { url: string; span: number; provider: any; head?: number };
+type LogCache = { from: number; to: number; complete: boolean; logs: any[]; pending?: Promise<unknown> };
+
+/** Blocks re-read at the top of an incremental scan, so a log in a block that was later reorged out is dropped. */
+const REORG_DEPTH = 32;
+const LOGS_TIMEOUT_MS = 15000;
+const withTimeout = <T,>(p: Promise<T>, ms: number) => new Promise<T>((res, rej) => { const t = setTimeout(() => rej(new Error(`timeout after ${ms} ms`)), ms); p.then((v) => { clearTimeout(t); res(v); }, (e) => { clearTimeout(t); rej(e); }); });
+const errText = (e: any) => String(e?.shortMessage || e?.info?.error?.message || e?.error?.message || e?.message || e).slice(0, 160);
 
 export const BRAIN_ABI = [
   "function brainState() view returns (int16[] v,int8[] bias,uint16[16] headingHist,int32[] pendingInput,uint64 step,uint64 energy,bool alive,uint32 generation,int64 posX,int64 posY,int32 headX,int32 headY)",
@@ -38,16 +53,25 @@ export const TOKEN_ABI = [
 ];
 // gas limits: public RPC estimation caps out at ~16.7M, so we set them ourselves
 const GAS = { tick16: 4_500_000, tick32: 9_000_000, stim16: 9_000_000, stim32: 15_500_000 };
+// FlyCore (per-fly cores), measured on a fresh chain with cold storage: tick(id,16) 4.25M with a cue active
+// (FlyCore.t.sol test_gas) but 5.84M with a turn x2 active and 7.31M worst case (turn x255, ring saturated);
+// tick(id,32) 8.75M / 10.8M / 13.8M in the same states. A tick that runs out of gas is charged the whole limit
+// and does nothing, so the limits cover the worst case; unused gas is refunded. stimulate(…, 16 steps) = tick + ~65k.
+const CORE_GAS = { tick16: 8_000_000, tick32: 15_000_000, stim0: 300_000, stim16: 9_000_000, stim32: 15_500_000 };
 
 export class Chain {
-  provider: any = null; brain: any = null; token: any = null; world: any = null; worldW: any; registry: any = null; registryW: any; signer: any = null; account: string | null = null; brainW: any; tokenW: any; prices: any;
+  provider: any = null; rpcUrl = ""; brain: any = null; token: any = null; world: any = null; worldW: any; registry: any = null; registryW: any; signer: any = null; account: string | null = null; brainW: any; tokenW: any; prices: any;
+  /** FlyCore, only when CFG.core is set (feature-gated until it is deployed). */
+  core: any = null; coreW: any; corePrices: { stimPrice: bigint; stimTTL: number; maxSteps: number } | null = null;
+  _logEndpoints: LogEndpoint[] | null = null;
+  _logCache = new Map<string, LogCache>();
   async connectRead() {
     let lastErr;
     for (const url of CFG.rpc) {
       try {
         const p = new ethers.JsonRpcProvider(url, CFG.chainId, { staticNetwork: true });
         await Promise.race([p.getBlockNumber(), new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 6000))]);
-        this.provider = p; break;
+        this.provider = p; this.rpcUrl = url; break;
       } catch (e) { lastErr = e; }
     }
     if (!this.provider) throw lastErr || new Error("no rpc");
@@ -55,6 +79,7 @@ export class Chain {
     this.token = new ethers.Contract(CFG.token, TOKEN_ABI, this.provider);
     this.world = new ethers.Contract(CFG.world, WORLD_ABI, this.provider);
     this.registry = new ethers.Contract(CFG.registry, REGISTRY_ABI as any, this.provider);
+    if (CFG.core) this.core = new ethers.Contract(CFG.core, CORE_ABI as any, this.provider);
     const [tps, sp, rp, ttl, maxSteps] = await Promise.all([this.brain.TOKENS_PER_STEP(), this.brain.STIM_PRICE(), this.brain.RESURRECT_PRICE(), this.brain.STIM_TTL(), this.brain.MAX_STEPS()]);
     this.prices = { tokensPerStep: tps, stimPrice: sp, resurrectPrice: rp, stimTTL: Number(ttl), maxSteps: Number(maxSteps) };
     return this;
@@ -84,21 +109,94 @@ export class Chain {
     return { stepsPerSecond: steps / dt, stepsPerDay: (steps / dt) * 86400, windowSeconds: dt, ticks: ticks.length };
   }
 
+  // ---- Event scans. Public BSC RPCs are uneven about eth_getLogs (publicnode refuses blocks older than ~10k as
+  // "archive", the dataseeds refuse it outright, others cap the range), so a record is read across several endpoints,
+  // newest chunk first, moving to the next endpoint when one fails, and the result says how far back it reached.
+  /** Endpoints for eth_getLogs, in order: the private RPC if there is one, the ones known to serve history, then the
+   *  rest of the public list (good for the most recent blocks only). Built once per Chain. */
+  logEndpoints(): LogEndpoint[] {
+    if (this._logEndpoints) return this._logEndpoints;
+    const out: LogEndpoint[] = [], seen = new Set<string>();
+    const add = (url: string, span: number) => {
+      if (!url || seen.has(url)) return; seen.add(url);
+      const provider = url === this.rpcUrl ? this.provider : new ethers.JsonRpcProvider(url, CFG.chainId, { staticNetwork: true, batchMaxCount: 1 });
+      out.push({ url, span, provider });
+    };
+    for (const url of CFG.privateRpc) add(url, CFG.logsSpan);
+    for (const e of CFG.logsRpc) add(e.url, e.span);
+    for (const url of CFG.rpc) add(url, CFG.logsSpan);
+    return (this._logEndpoints = out);
+  }
+  /** Raw logs matching `filter` in the last `blocks` blocks, never older than `floor`, sorted oldest first. Never
+   *  throws for a failed chunk: it returns what could be read and, in `scan`, the block it got back to. A repeat scan
+   *  of the same filter reads only the blocks that are new since the last one (plus REORG_DEPTH for safety), so a
+   *  page polling for changes costs one small request, not a full re-scan. */
+  async scanLogs(filter: { address: string; topics?: any[] }, blocks: number, floor = 0): Promise<{ logs: any[]; scan: LogScan }> {
+    const key = JSON.stringify([String(filter.address).toLowerCase(), filter.topics || null]);
+    const prev = this._logCache.get(key);
+    if (prev?.pending) await prev.pending.catch(() => {});   // one scan at a time per filter; the second continues from its cache
+    const run = this._scanLogs(key, filter, blocks, floor);
+    const cached = this._logCache.get(key);
+    this._logCache.set(key, { ...(cached || { from: 0, to: 0, complete: false, logs: [] }), pending: run });
+    try { return await run; } finally { const c = this._logCache.get(key); if (c && c.pending === run) delete c.pending; }
+  }
+  async _scanLogs(key: string, filter: { address: string; topics?: any[] }, blocks: number, floor: number): Promise<{ logs: any[]; scan: LogScan }> {
+    const eps = this.logEndpoints();
+    const to = Number(await this.provider.getBlockNumber()), from = Math.max(floor, to - blocks + 1);
+    for (const ep of eps) ep.head = ep.provider === this.provider ? to : undefined;   // re-read once per scan, lazily, for the endpoints used
+    const headOf = async (ep: LogEndpoint) => { if (ep.head === undefined) ep.head = Number(await withTimeout(ep.provider.getBlockNumber(), 6000)); return ep.head; };
+    const host = (ep: LogEndpoint) => ep.url.replace(/^https?:\/\/([^/]+).*/, "$1");
+    // incremental: a complete earlier scan of this filter is kept below `lo`; only the blocks above it are read again
+    const cached = this._logCache.get(key);
+    const incremental = !!(cached && cached.complete && cached.from <= from && cached.to >= from && cached.to <= to);
+    const lo = incremental ? Math.max(from, cached.to - REORG_DEPTH + 1) : from;
+    const logs: any[] = incremental ? cached.logs.filter((l) => l.blockNumber >= from && l.blockNumber < lo) : [];
+    let cursor = to, top = to, readAny = false, ei = 0;
+    while (cursor >= lo && ei < eps.length) {
+      const ep = eps[ei];
+      try {
+        // an endpoint refuses a range past its own head, and the app's provider may be a block or two ahead of it
+        const hi = Math.min(cursor, await headOf(ep));
+        if (hi < lo) { ei++; continue; }
+        if (!readAny) top = Math.min(top, hi);   // blocks above every endpoint's head are left for the next scan
+        const chunkFrom = Math.max(lo, hi - ep.span + 1);
+        const got = await withTimeout(ep.provider.getLogs({ ...filter, fromBlock: chunkFrom, toBlock: hi }), LOGS_TIMEOUT_MS);
+        logs.push(...got); cursor = chunkFrom - 1; readAny = true;
+      } catch (e) {
+        console.warn(`eth_getLogs ${filter.address} up to block ${cursor} on ${host(ep)} failed (${errText(e)}); trying the next endpoint`);
+        ei++;
+      }
+    }
+    const complete = cursor < lo;
+    if (!complete && incremental) {
+      // the new blocks could not be read from anywhere: the last complete result, as of its own block, beats a gap
+      console.warn(`event scan of ${filter.address}: no endpoint served blocks ${lo}…${to}; showing the record as of block ${cached.to}`);
+      return { logs: cached.logs.filter((l) => l.blockNumber >= from), scan: { from, to: cached.to, complete: true, floor } };
+    }
+    const seen = new Set<string>(), out: any[] = [];
+    for (const l of logs) { const k = `${l.transactionHash}:${l.index}`; if (l.blockNumber <= top && !seen.has(k)) { seen.add(k); out.push(l); } }
+    out.sort((x, y) => x.blockNumber - y.blockNumber || x.index - y.index);
+    const scan: LogScan = { from: complete ? from : cursor + 1, to: top, complete, floor };
+    if (!complete) console.warn(`event scan of ${filter.address} is partial: blocks ${scan.from}…${scan.to} only (asked for ${from}…${to})`);
+    this._logCache.set(key, { from: scan.from, to: scan.to, complete, logs: out });
+    return { logs: out, scan };
+  }
+  /** Decoded events of one contract, newest first, with how far back the scan reached. */
+  async _events(contract: any, filter: { address: string; topics?: any[] }, blocks: number, floor = 0, keep?: (p: any) => boolean): Promise<EventScan> {
+    const { logs, scan } = await this.scanLogs(filter, blocks, floor);
+    const events: Ev[] = [];
+    for (const l of logs) { try { const p = contract.interface.parseLog({ topics: l.topics, data: l.data }); if (p && (!keep || keep(p))) events.push({ name: p.name, args: p.args, block: l.blockNumber, tx: l.transactionHash }); } catch {} }
+    return { events: events.reverse(), scan };
+  }
+
   async worldInfo() {
     const [alive, generation, lastAgeMs, lastEnergy, totalBurned, foodCount, tps, minFood, resPrice, arena] = await Promise.all([
       this.world.alive(), this.world.generation(), this.world.lastAgeMs(), this.world.lastEnergy(), this.world.totalBurned(), this.world.foodCount(),
       this.world.TOKENS_PER_SECOND(), this.world.MIN_FOOD(), this.world.RESURRECT_PRICE(), this.world.ARENA()]);
     return { alive, generation: Number(generation), lastAgeMs: Number(lastAgeMs), lastEnergy: Number(lastEnergy), totalBurned, foodCount: Number(foodCount), tps, minFood, resPrice, arena: Number(arena) };
   }
-  async worldEvents(blocks = 40000) {
-    const to = await this.provider.getBlockNumber(); const from = Math.max(0, to - blocks);
-    const raw: any[] = [];
-    for (let b = to; b > from; b -= 2000) { try { raw.push(...(await this.provider.getLogs({ address: CFG.world, fromBlock: Math.max(from, b - 1999), toBlock: b }))); } catch (e) { console.warn("world logs chunk failed", e); } }
-    raw.sort((x, y) => x.blockNumber - y.blockNumber || x.index - y.index);
-    const out = [];
-    for (const l of raw) { try { const p = this.world.interface.parseLog({ topics: l.topics, data: l.data }); if (p) out.push({ name: p.name, args: p.args, block: l.blockNumber, tx: l.transactionHash }); } catch {} }
-    return out.reverse();
-  }
+  /** FlyWorld's events, newest first, from the last `blocks` blocks. */
+  worldEvents(blocks = 40000): Promise<EventScan> { return this._events(this.world, { address: CFG.world }, blocks); }
   /** The live server announces its public origin in the snapshotURI of each checkpoint. */
   liveOrigin(events: any[]) {
     for (const e of events) { if ((e.name === "Checkpoint" || e.name === "Died") && e.args.snapshotURI) { try { return new URL(e.args.snapshotURI).origin; } catch {} } }
@@ -118,14 +216,11 @@ export class Chain {
     return { id, name, owner, uri, connectome: f.connectome, model: Number(f.model), generation: Number(f.generation), deaths: Number(f.deaths), parentA: Number(f.parentA), parentB: Number(f.parentB), stateRoot: f.stateRoot, memoryRoot: f.memoryRoot, stateURI: f.stateURI, brainStep: Number(f.brainStep), energy: Number(f.energy), bornBlock: Number(f.bornBlock), lastCommitBlock: Number(f.lastCommitBlock), body: f.body, pendingBody: f.pendingBody, alive: f.alive };
   }
   async bodyInfo(addr: string) { const b = await this.registry.bodies(addr); return { name: b.name, uri: b.uri, flies: Number(b.flies) }; }
-  async registryEvents(blocks = 40000, flyId?: number) {
-    const to = await this.provider.getBlockNumber(); const from = Math.max(CFG.registryDeployBlock, to - blocks);
-    const raw: any[] = [];
-    for (let b = to; b > from; b -= 2000) { try { raw.push(...(await this.provider.getLogs({ address: CFG.registry, fromBlock: Math.max(from, b - 1999), toBlock: b }))); } catch (e) { console.warn("registry logs chunk failed", e); } }
-    raw.sort((x, y) => x.blockNumber - y.blockNumber || x.index - y.index);
-    const out = [];
-    for (const l of raw) { try { const p = this.registry.interface.parseLog({ topics: l.topics, data: l.data }); if (p && (flyId === undefined || (p.args.id !== undefined && Number(p.args.id) === flyId) || (p.args._tokenId !== undefined && Number(p.args._tokenId) === flyId))) out.push({ name: p.name, args: p.args, block: l.blockNumber, tx: l.transactionHash }); } catch {} }
-    return out.reverse();
+  /** The registry's events (one fly's, when `flyId` is given), newest first, from the last `blocks` blocks but never
+   *  before the registry existed. One scan serves every fly: the filter by id is applied to the decoded events. */
+  registryEvents(blocks = 40000, flyId?: number): Promise<EventScan> {
+    const mine = (p: any) => flyId === undefined || (p.args.id !== undefined && Number(p.args.id) === flyId) || (p.args._tokenId !== undefined && Number(p.args._tokenId) === flyId);
+    return this._events(this.registry, { address: CFG.registry }, blocks, CFG.registryDeployBlock, mine);
   }
   async metadataOf(uri: string) { const u = uri.startsWith("ipfs://") ? CFG.ipfsGateway + uri.slice(7) : uri; try { return await (await fetch(u)).json(); } catch { return null; } }
   ipfsHttp(uri: string) { return uri && uri.startsWith("ipfs://") ? CFG.ipfsGateway + uri.slice(7) : uri; }
@@ -136,15 +231,48 @@ export class Chain {
   async breedFlies(a: number, b: number, name: string, price: bigint) { await this._ensureAllowanceFor(CFG.registry, price); return (await this.registryW.breed(a, b, ethers.ZeroHash, name, { gasLimit: 500000 })).wait(); }
   async ownedFlies(owner: string, total: number) { const out: number[] = []; for (let i = 1; i <= total; i++) { try { if ((await this.registry.ownerOf(i)).toLowerCase() === owner.toLowerCase()) out.push(i); } catch {} } return out; }
 
-  async recentEvents(blocks = 20000) {
-    const to = await this.provider.getBlockNumber(); const from = Math.max(0, to - blocks);
-    const raw: any[] = [];
-    for (let b = to; b > from; b -= 2000) { try { raw.push(...(await this.provider.getLogs({ address: CFG.brain, fromBlock: Math.max(from, b - 1999), toBlock: b }))); } catch (e) { console.warn("getLogs chunk failed", e); } }
-    raw.sort((x, y) => x.blockNumber - y.blockNumber || x.index - y.index);
-    const out = [];
-    for (const l of raw) { try { const p = this.brain.interface.parseLog({ topics: l.topics, data: l.data }); if (p) out.push({ name: p.name, args: p.args, block: l.blockNumber, tx: l.transactionHash }); } catch {} }
-    return out.reverse();
+  // ---- FlyCore: the per-fly compass core (155 neurons in the EVM, keyed by registry id)
+  get hasCore() { return !!this.core; }
+  async coreInfo() {
+    if (!this.core) throw new Error("FlyCore is not configured");
+    const [sp, ttl, maxSteps] = await Promise.all([this.core.STIM_PRICE(), this.core.STIM_TTL(), this.core.MAX_STEPS()]);
+    this.corePrices = { stimPrice: sp, stimTTL: Number(ttl), maxSteps: Number(maxSteps) };
+    return this.corePrices;
   }
+  /** The whole on-chain state of one fly's core, plus its hash and the block it was read at. */
+  async coreState(id: number) {
+    const [c, hash, block] = await Promise.all([this.core.core(id), this.core.coreHash(id), this.provider.getBlockNumber()]);
+    const step = Number(c.step), stimChannel = Number(c.stimChannel), stimUntilStep = Number(c.stimUntilStep);
+    return {
+      v: Array.from(c.v, Number), bias: Array.from(c.bias, Number), hist: Array.from(c.headingHist, Number), inp: Array.from(c.pendingInput, Number),
+      step, headX: Number(c.headX), headY: Number(c.headY), posX: Number(c.posX), posY: Number(c.posY),
+      stimChannel, stimParam: Number(c.stimParam), stimStrength: Number(c.stimStrength), stimUntilStep, stimActive: stimChannel !== 0 && step < stimUntilStep,
+      totalSpikes: Number(c.totalSpikes), hash, block,
+    };
+  }
+  /** Ticked / Stimulated / Seeded events of one fly's core, newest first, from the last `blocks` blocks but never
+   *  before the core existed. Filtered on the node by the indexed id, so a fly's record is one small request. */
+  coreEvents(id: number, blocks = 40000): Promise<EventScan> {
+    const iface = this.core.interface;
+    const topics = [["Ticked", "Stimulated", "Seeded"].map((n) => iface.getEvent(n).topicHash), ethers.zeroPadValue(ethers.toBeHex(id), 32)];
+    return this._events(this.core, { address: CFG.core, topics }, blocks, CFG.coreDeployBlock || CFG.registryDeployBlock);
+  }
+  /** True when the connected wallet is the body currently running fly `id` (its senses are free; anyone else burns STIM_PRICE x strength). */
+  async isCoreBody(id: number) { if (!this.account) return false; const f = await this.registry.fly(id); return String(f.body).toLowerCase() === this.account.toLowerCase(); }
+  async coreStimulate(id: number, channel: number, param: number, strength: number, steps: number) {
+    if (!this.coreW) throw new Error("Connect a wallet first.");
+    if (!this.corePrices) await this.coreInfo();
+    if (!(await this.isCoreBody(id))) await this._ensureAllowanceFor(CFG.core, this.corePrices!.stimPrice * BigInt(strength));
+    const gasLimit = steps === 0 ? CORE_GAS.stim0 : steps > 16 ? CORE_GAS.stim32 : CORE_GAS.stim16;
+    return (await this.coreW.stimulate(id, channel, param, strength, steps, { gasLimit })).wait();
+  }
+  async coreTick(id: number, steps: number) {
+    if (!this.coreW) throw new Error("Connect a wallet first.");
+    return (await this.coreW.tick(id, steps, { gasLimit: steps > 16 ? CORE_GAS.tick32 : CORE_GAS.tick16 })).wait();
+  }
+
+  /** FlyBrain v2's events, newest first, from the last `blocks` blocks. */
+  recentEvents(blocks = 20000): Promise<EventScan> { return this._events(this.brain, { address: CFG.brain }, blocks); }
   async connectWallet() {
     const eth = (window as any).ethereum;
     if (!eth) throw new Error("No wallet found. Install MetaMask, Rabby or Binance Wallet.");
@@ -158,6 +286,7 @@ export class Chain {
     }
     this.signer = await bp.getSigner(); this.account = await this.signer.getAddress();
     this.brainW = this.brain.connect(this.signer); this.tokenW = this.token.connect(this.signer); this.worldW = this.world.connect(this.signer); this.registryW = this.registry.connect(this.signer);
+    if (this.core) this.coreW = this.core.connect(this.signer);
     return this.account;
   }
   async balance() { return this.account ? this.token.balanceOf(this.account) : 0n; }

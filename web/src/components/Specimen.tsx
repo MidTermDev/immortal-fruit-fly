@@ -3,17 +3,22 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CFG } from "@/lib/config";
-import { Chain } from "@/lib/chain";
-import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName } from "@/lib/registry";
+import { Chain, LogScan } from "@/lib/chain";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName, isCoreOnlyBody, scanLabel } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
+import Core from "@/components/Core";
+
+const EVENTS_BLOCKS = 80000;
 
 export default function Specimen() {
   const sp = useSearchParams(); const id = Math.max(0, parseInt(sp.get("id") || "1", 10) || 0);
   const chainRef = useRef<Chain | null>(null);
+  const [chain, setChain] = useState<Chain | null>(null);   // the same object, as state, for children that render from it
   const [f, setF] = useState<FlyRecord | null>(null);
   const [meta, setMeta] = useState<any>(null);
   const [info, setInfo] = useState<RegistryInfo | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
+  const [scan, setScan] = useState<LogScan | null>(null);
   const [children, setChildren] = useState<{ id: number; name: string }[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [, setLiveUrl] = useState("");
@@ -34,17 +39,19 @@ export default function Specimen() {
   const refresh = async (ch: Chain) => {
     const rec = await ch.flyRecord(id); setF(rec);
     if (rec.uri && rec.uri.startsWith("ipfs://")) ch.metadataOf(rec.uri).then((m) => m && setMeta(m));
-    const [mine, all] = await Promise.all([ch.registryEvents(80000, id), ch.registryEvents(80000)]);
-    setEvents(mine);
+    // one scan of the registry serves both lists (the second call reads from the first one's cache)
+    const [{ events: mine, scan: sc }, { events: all }] = await Promise.all([ch.registryEvents(EVENTS_BLOCKS, id), ch.registryEvents(EVENTS_BLOCKS)]);
+    setEvents(mine); setScan(sc);
     setChildren(all.filter((e) => e.name === "Minted" && (Number(e.args.parentA) === id || Number(e.args.parentB) === id)).map((e) => ({ id: Number(e.args.id), name: e.args.name })));
     const bodies = new Set<string>(); for (const e of mine) { if (e.args.body) bodies.add(String(e.args.body).toLowerCase()); }
+    for (const b of [rec.body, rec.pendingBody]) if (b && b !== ZERO) bodies.add(b.toLowerCase());
     const nm: Record<string, string> = {}; for (const b of bodies) { try { const bi = await ch.bodyInfo(b); if (bi.name) nm[b] = bi.name; if (b === CFG.bodies.arena.toLowerCase() && /^https:\/\//.test(bi.uri)) setLiveUrl(bi.uri); } catch {} }
     setNames(nm);
   };
   useEffect(() => {
     if (!id) return;
     (async () => {
-      try { const ch = await new Chain().connectRead(); chainRef.current = ch; setInfo(await ch.registryInfo()); await refresh(ch); }
+      try { const ch = await new Chain().connectRead(); chainRef.current = ch; setChain(ch); setInfo(await ch.registryInfo()); await refresh(ch); }
       catch (e: any) { setErr(e.reason === "ERC721NonexistentToken" || /nonexistent/i.test(e.message || "") ? `Fly #${id} has not been minted.` : "Could not read this fly: " + (e.shortMessage || e.message)); }
     })();
     return () => clearTimeout(tt.current);
@@ -67,7 +74,7 @@ export default function Specimen() {
   const breed = () => { const p = parseInt(partner, 10); if (!p || p === id) return setToast("Choose another fly you own."); const nm = childName.trim().slice(0, 40); if (!nm) return setToast("Name the child."); run("Breed", () => chainRef.current!.breedFlies(id, p, nm, info!.breed), (rc) => `A child was born in block ${fmt(rc.blockNumber)}.`); };
 
   if (!id) return <main className="wrap" style={{ padding: "60px 0" }}><p>Which fly? <Link href="/flies/">See the collection.</Link></p></main>;
-  const s = f ? status(f) : null; const isOwner = !!(wallet && f && wallet.toLowerCase() === f.owner.toLowerCase());
+  const s = f ? status(f, names) : null; const isOwner = !!(wallet && f && wallet.toLowerCase() === f.owner.toLowerCase());
   const commits = events.filter((e) => e.name === "Commit").length, jumps = events.filter((e) => e.name === "Interaction" && /jumped/.test(String(e.args.data))).length;
   return (
     <main>
@@ -91,7 +98,7 @@ export default function Specimen() {
             <aside className="chart" style={{ paddingBottom: 0 }}>
               <div className="chart-t"><b>Record</b><span className="lbl">from the registry</span></div>
               <div className="crow"><span>owner</span><span><a href={`${CFG.explorer}/address/${f?.owner}`} target="_blank" rel="noopener">{f ? short(f.owner) : "—"}</a>{isOwner ? " (you)" : ""}</span></div>
-              <div className="crow"><span>body</span><span>{f ? (f.body !== ZERO ? bodyName(f.body, names) : f.pendingBody !== ZERO ? `→ ${bodyName(f.pendingBody, names)} (pending)` : "none") : "—"}</span></div>
+              <div className="crow"><span>body</span><span>{f ? (f.body !== ZERO ? (isCoreOnlyBody(f.body) ? <>{bodyName(f.body, names)} <Link href="/docs/pebbles/" className="dim" title="A pebble runs only the fly's on-chain compass core; the whole-brain snapshot is preserved until a whole-brain body takes it back">(core only: the whole brain sleeps)</Link></> : bodyName(f.body, names)) : f.pendingBody !== ZERO ? `→ ${bodyName(f.pendingBody, names)} (pending)` : "none") : "—"}</span></div>
               <div className="crow"><span>energy at last checkpoint</span><span>{f ? hms(f.energy) : "—"}</span></div>
               <div className="crow"><span>generation · deaths</span><span>{f ? `${f.generation} · ${f.deaths}` : "—"}</span></div>
               <div className="crow"><span>brain step</span><span>{f ? fmt(f.brainStep) : "—"}<small className="dim"> ({f ? (f.brainStep / 10000).toFixed(0) : "—"} s lived)</small></span></div>
@@ -106,7 +113,7 @@ export default function Specimen() {
           <div className="care-grid" style={{ marginTop: 44 }}>
             <div className="care-col">
               <div className="care-t"><h3>Feed</h3><span className="cost">{info ? `${fmtTok(info.feed)} $FLY = 1 s` : ""}</span></div>
-              <p>{f && f.body !== ZERO ? `Food appears in ${bodyName(f.body, names)} at the next poll; the fly has to smell its way there.` : "Banked as energy until a body runs it."} Anyone may feed any fly.</p>
+              <p>{f && f.body !== ZERO ? (isCoreOnlyBody(f.body) ? `${bodyName(f.body, names)} hears it at its next poll and refills its energy bar.` : `Food appears in ${bodyName(f.body, names)} at the next poll; the fly has to smell its way there.`) : "Banked as energy until a body runs it."} Anyone may feed any fly.</p>
               <div className="field"><input type="number" min={1} value={secs} onChange={(e) => setSecs(e.target.value)} aria-label="Seconds of life" /><button className="btn fill" disabled={busy || !f || !f.alive} onClick={wallet ? feed : connect}>{busy ? "…" : wallet ? "Feed" : "Connect"}</button></div>
               <div className="lbl">= {Number(secs) ? hms(Number(secs)) : "—"} of life · {wallet ? `${short(wallet)} · ${bal}` : ""}</div>
             </div>
@@ -135,9 +142,11 @@ export default function Specimen() {
             </div>
           </div>
 
+          {CFG.core && f && <Core id={id} fly={f} chain={chain} wallet={wallet} connect={connect} toast={setToast} names={names} />}
+
           <div style={{ marginTop: 44 }}>
-            <div className="log-head"><b style={{ fontSize: 13 }}>Interaction history</b><span className="lbl">every body it has lived in · newest first · {events.length} events in the last 80k blocks</span></div>
-            <RecordList events={events} names={names} empty={err ? "" : "reading BNB Smart Chain…"} />
+            <div className="log-head"><b style={{ fontSize: 13 }}>Interaction history</b><span className="lbl">every body it has lived in · newest first · {events.length} events {scanLabel(scan, EVENTS_BLOCKS)}</span></div>
+            <RecordList events={events} names={names} empty={err ? "" : !scan ? "reading BNB Smart Chain…" : scan.complete ? "no events yet" : `no events since block ${fmt(scan.from)}; the public RPCs would not serve older blocks right now`} />
           </div>
           {meta?.attributes && <div style={{ marginTop: 34 }}>
             <div className="log-head"><b style={{ fontSize: 13 }}>Token metadata</b><span className="lbl">as marketplaces read it · <a href={ipfs(f?.uri || "")} target="_blank" rel="noopener">{f?.uri.slice(0, 30)}…</a></span></div>

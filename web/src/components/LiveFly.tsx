@@ -2,12 +2,13 @@
 import { useEffect, useRef, useState } from "react";
 import { CFG } from "@/lib/config";
 import Link from "next/link";
-import { Chain } from "@/lib/chain";
+import { Chain, LogScan } from "@/lib/chain";
 import { BrainLive } from "@/lib/brain3d";
-import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, status, bodyName } from "@/lib/registry";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, status, bodyName, scanLabel } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
 
 const FLY_ID = 1;
+const EVENTS_BLOCKS = 40000;
 type Frame = { hdr: any; spikes: Uint16Array };
 
 export default function LiveFly() {
@@ -22,6 +23,7 @@ export default function LiveFly() {
   const [fly, setFly] = useState<FlyRecord | null>(null);
   const [reg, setReg] = useState<RegistryInfo | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
+  const [scan, setScan] = useState<LogScan | null>(null);
   const [wallet, setWallet] = useState<string | null>(null);
   const [bal, setBal] = useState("");
   const [amount, setAmount] = useState("600");
@@ -61,7 +63,7 @@ export default function LiveFly() {
       try {
         const ch = await new Chain().connectRead(); chainRef.current = ch;
         // The arena body announces its live stream origin in bodies(arena).uri; a fly's whole record is on the registry.
-        const read = async () => { const [rec, ri, evs, body] = await Promise.all([ch.flyRecord(FLY_ID), ch.registryInfo(), ch.registryEvents(40000, FLY_ID), ch.bodyInfo(CFG.bodies.arena)]); setFly(rec); setReg(ri); setEvents(evs); return /^https:\/\//.test(body.uri) ? new URL(body.uri).origin : ""; };
+        const read = async () => { const [rec, ri, evs, body] = await Promise.all([ch.flyRecord(FLY_ID), ch.registryInfo(), ch.registryEvents(EVENTS_BLOCKS, FLY_ID), ch.bodyInfo(CFG.bodies.arena)]); setFly(rec); setReg(ri); setEvents(evs.events); setScan(evs.scan); return /^https:\/\//.test(body.uri) ? new URL(body.uri).origin : ""; };
         const o = await read(); if (o) org = o;
         poll = setInterval(async () => { try { const o2 = await read(); if (o2 && o2 !== orgRef.current) { setOrigin(o2); connect(o2); } } catch {} }, 60000);
       } catch (e) { console.warn("chain unavailable", e); }
@@ -102,7 +104,7 @@ export default function LiveFly() {
     const ch = chainRef.current; if (!ch) return setToast("Not connected to BNB Chain.");
     try { const a = await ch.connectWallet(); setWallet(a); setBal(fmtTok(await ch.balance()) + " FLY"); setToast(`Connected ${short(a)}`); } catch (e: any) { setToast(e.shortMessage || e.message, 6000); }
   };
-  const reload = async (ch: Chain) => { const [rec, evs] = await Promise.all([ch.flyRecord(FLY_ID), ch.registryEvents(40000, FLY_ID)]); setFly(rec); setEvents(evs); setBal(fmtTok(await ch.balance()) + " FLY"); };
+  const reload = async (ch: Chain) => { const [rec, evs] = await Promise.all([ch.flyRecord(FLY_ID), ch.registryEvents(EVENTS_BLOCKS, FLY_ID)]); setFly(rec); setEvents(evs.events); setScan(evs.scan); setBal(fmtTok(await ch.balance()) + " FLY"); };
   const feed = async () => {
     const ch = chainRef.current; if (!ch || !wallet || !reg) return setToast("Connect a wallet first.");
     const n = Math.floor(Number(amount) || 0); if (n < 1) return setToast("At least one second.");
@@ -239,8 +241,8 @@ export default function LiveFly() {
             </div>
           </div>
           <div style={{ marginTop: 40 }}>
-            <div className="log-head"><b style={{ fontSize: 13 }}>Record</b><span className="lbl">feeds, checkpoints, jumps, bodies, deaths · newest first · <Link href={`/fly/?id=${FLY_ID}`}>full history →</Link></span></div>
-            <RecordList events={events} max={60} />
+            <div className="log-head"><b style={{ fontSize: 13 }}>Record</b><span className="lbl">feeds, checkpoints, jumps, bodies, deaths · newest first · {events.length} events {scanLabel(scan, EVENTS_BLOCKS)} · <Link href={`/fly/?id=${FLY_ID}`}>full history →</Link></span></div>
+            <RecordList events={events} max={60} empty={!scan ? "reading BNB Smart Chain…" : scan.complete ? `nothing ${scanLabel(scan, EVENTS_BLOCKS)}: see the full history` : `nothing since block ${fmt(scan.from)}; the public RPCs would not serve older blocks right now`} />
           </div>
           {h?.events?.length > 0 && (<div style={{ marginTop: 28 }}>
             <div className="log-head"><b style={{ fontSize: 13 }}>Diary</b><span className="lbl">what happened to it in the arena</span></div>

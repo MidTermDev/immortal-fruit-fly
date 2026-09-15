@@ -123,11 +123,11 @@ Each step is shippable and leaves the live fly running.
 1. **`FlyRegistry` + migration.** Write, test (Foundry, including a replay of fly #1's real history), deploy. Mint fly #1 for Specimen 001 with its current whole-brain state as genesis; fold FlyWorld's checkpoints and FlyArcade's session 5 into its history as `interaction` events; retire FlyWorld/FlyArcade to read-only. **[Done.]**
 2. **Permanent storage.** IPFS pin on every commit, `stateURI = ipfs://…`; Greenfield mirror later. **[Done, IPFS.]**
 3. **The arena and DOOM as bodies.** `server.py` and `doom.py` speak the registry protocol: accept, instantiate (fetch + verify), commit, interactions, death. Demonstrate the loop: fly #1 arena → DOOM → arena with hashes matching across the move. **[Done on mainnet.]** The Body SDK (packaging the loop for others) is still to do.
-4. **Per-fly on-chain core.** `FlyCore` keyed by registry id; the arena and DOOM bodies cue it; the commit carries its heading.
+4. **Per-fly on-chain core.** `FlyCore` keyed by registry id; the arena and DOOM bodies cue it; the commit carries its heading. **[In progress: built for the pebbles, see [HARDWARE.md](HARDWARE.md).]**
 5. **Minting for everyone.** Site: mint (1 $FLY), your flies, assign to a body, feed, resurrect, breed; a fly page with its lineage, its history across bodies, its live stream when the arena is running it; marketplace branding (`contractURI`, per-token metadata; Element indexes BNB Chain, OpenSea does not). **[Done.]** Then the arena hosts many flies at once (same brain kernel, time-sliced; ~50 flies per machine). **[To do.]**
 6. **Attestors.** Publish the re-runner; run two independent ones ourselves; show attestation counts.
 7. **Memory.** Mushroom-body plasticity in the model, `memoryRoot`, `breed`.
-8. **More bodies.** RuneScape (the copied world), and an open call for robots. DOOM stays as the demo body.
+8. **More bodies.** Pebbles: five M5Stack CoreS3 handhelds, each a wallet and a body that runs a fly's on-chain core from real sensors ([HARDWARE.md](HARDWARE.md)). RuneScape (the copied world), and an open call for robots. DOOM stays as the demo body.
 
 ## 5. What we stop doing
 
