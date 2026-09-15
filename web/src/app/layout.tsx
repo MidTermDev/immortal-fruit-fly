@@ -20,15 +20,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${sans.variable} ${serif.variable} ${mono.variable}`}>
       <body>
-        <div className="runhead">
-          <div className="wrap">
-            <span>Specimen 001</span>
-            <span className="hide-s">Drosophila melanogaster · head-direction ring</span>
-            <span className="sep" />
-            <span className="hide-s">FlyWire 783</span>
-            <span>BNB Smart Chain</span>
-          </div>
-        </div>
         <header className="topbar">
           <div className="wrap">
             <Link className="brand" href="/"><span className="glyph">(@@)</span> Immortal Fruit Fly</Link>
@@ -42,25 +33,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </div>
         </header>
         {children}
-        <footer>
-          <div className="wrap">
-            <div>
-              <p style={{ color: "var(--ink-2)", maxWidth: "46ch" }}>An organism made of public connectome data, kept alive by whoever feeds it. Not financial advice. It is a fly.</p>
-              <div className="links">
-                <a href={CFG.links.x} target="_blank" rel="noopener">X</a>
-                <a href={CFG.links.telegram} target="_blank" rel="noopener">Telegram</a>
-                <a href={CFG.links.github} target="_blank" rel="noopener">GitHub</a>
-                <a href={`${CFG.explorer}/address/${CFG.brain}`} target="_blank" rel="noopener">BscScan</a>
-                <a href={CFG.links.sourcify + CFG.brain} target="_blank" rel="noopener">Verified source</a>
-              </div>
-            </div>
-            <div className="cite">
-              Circuit: Dorkenwald et al. &amp; Schlegel et al., <i>Nature</i> 632 (2024), FlyWire release 783.<br />
-              Connectivity: doi:10.5281/zenodo.10676866<br />
-              Organism: FlyBrain, BNB Smart Chain 56, {CFG.brain}
-            </div>
-          </div>
-        </footer>
       </body>
     </html>
   );

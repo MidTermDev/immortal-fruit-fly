@@ -34,9 +34,6 @@ pre code { background: none; padding: 0; }
 .dim { color: var(--ink-2); }
 
 /* ── masthead ───────────────────────────────────────────────── */
-.runhead { border-bottom: 1px solid var(--rule); background: var(--paper); }
-.runhead .wrap { display: flex; align-items: center; gap: 18px; height: 30px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
-.runhead .sep { flex: 1; border-top: 1px solid var(--rule-2); }
 .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 30; background: rgba(242, 242, 239, 0.94); backdrop-filter: blur(10px); border-bottom: 1px solid var(--ink); }
 .topbar .wrap { display: flex; align-items: center; gap: 22px; height: 52px; }
 .brand { display: flex; align-items: baseline; gap: 9px; font-weight: 600; font-size: 15px; letter-spacing: -0.02em; white-space: nowrap; }
@@ -193,11 +190,6 @@ section.sec { padding-block: clamp(44px, 6vw, 76px); border-bottom: 1px solid va
 .avail > div:last-child { border-right: 0; }
 .avail .v { font-family: var(--mono); font-size: 11.5px; word-break: break-all; line-height: 1.6; color: var(--ink-2); margin-top: 6px; }
 
-footer { padding-block: 34px 56px; color: var(--ink-3); font-size: 13px; }
-footer .wrap { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 24px 48px; }
-footer .cite { font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--ink-2); border-left: 1px solid var(--rule); padding-left: 18px; }
-footer .links { display: flex; gap: 20px; margin-top: 12px; }
-footer a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
 .toast { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 12px 18px; font-size: 13.5px; z-index: 60; max-width: min(92vw, 560px); }
 
 /* ── docs ───────────────────────────────────────────────────── */
@@ -250,7 +242,6 @@ footer a:hover { color: var(--ink); text-decoration: underline; text-underline-o
   .docs-nav { position: static; flex-direction: row; flex-wrap: wrap; gap: 10px 20px; border-right: 0; border-bottom: 1px solid var(--rule); padding: 0 0 16px; }
   .docs-nav > div { flex-direction: row; flex-wrap: wrap; gap: 14px; }
   .docs-nav .lbl { display: none; }
-  footer .wrap { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
   .cols4, .avail, .doc-cards, .stack { grid-template-columns: 1fr; }
@@ -259,6 +250,4 @@ footer a:hover { color: var(--ink); text-decoration: underline; text-underline-o
   .lrow { grid-template-columns: 74px 1fr; gap: 6px 12px; }
   .lrow .who { grid-column: 2; }
   .b-raster { min-height: 250px; }
-  .runhead .wrap { gap: 10px; font-size: 9.5px; }
-  .runhead .hide-s { display: none; }
 }
