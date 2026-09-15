@@ -85,13 +85,13 @@ export function ContinuitySection() {
       <div className="wrap">
         <div className="sec-t">
           <div><div className="num">Continuity</div><h2>Death is a state, not an ending</h2></div>
-          <p>When energy reaches zero the animal stops. What it was at that instant — every membrane potential, the engram, the memory of every direction it has held — is hashed and written into its lineage. Resurrection does not make a copy or start over. The same brain continues from the same state, in a new body, at the origin.</p>
+          <p>When energy reaches zero the animal stops. What it was at that instant — every membrane potential, every synaptic current, the engram — is snapshotted, pinned to IPFS, and its hash written to the registry. Resurrection does not make a copy or start over. The same brain continues from the same state, in whichever body accepts it next: fly #1 has already died in the arena, woken up in DOOM, and come back, with every hash matching across the move.</p>
         </div>
         <div className="cols4">
-          <div><span className="lbl">state</span><h3>Brain</h3><p>155 membrane potentials and every pending synaptic current, in storage, rewritten on each tick.</p></div>
-          <div><span className="lbl">memory</span><h3>Engram</h3><p>Cells that fire habitually potentiate; silent ones depress. Bounded, permanent, and carried through death.</p></div>
-          <div><span className="lbl">record</span><h3>Lineage</h3><p>Birth block, death block, steps lived, spikes fired and the hash of the brain, one row per life.</p></div>
-          <div><span className="lbl">identity</span><h3>Accession</h3><p>155 FlyWire root IDs in the bytecode. The same animal, provably, in every generation.</p></div>
+          <div><span className="lbl">brain state</span><h3>139,248 neurons</h3><p>Every membrane potential, synaptic current and refractory clock, snapshotted to IPFS and hashed on-chain at each checkpoint.</p></div>
+          <div><span className="lbl">memory</span><h3>Engram</h3><p>In the on-chain core, cells that fire habitually potentiate; silent ones depress. Carried through death. Mushroom-body plasticity for the whole brain is next.</p></div>
+          <div><span className="lbl">lineage</span><h3>Generations</h3><p>Births, deaths, resurrections and breeding, as token ids on the registry. A child carries both parents.</p></div>
+          <div><span className="lbl">identity</span><h3>Connectome</h3><p>The sha256 of the FlyWire 783 connectome file and the model version, fixed at mint. The same animal, provably, in every body.</p></div>
         </div>
       </div>
     </section>
@@ -127,15 +127,17 @@ export function TokenSection() {
       <div className="wrap">
         <div className="sec-t">
           <div><div className="num">$FLY</div><h2>A token because the animal needs a metabolism</h2></div>
-          <p>$FLY is a BEP-20 with a 1% transfer tax, no owner and no mint. Its purpose is to be destroyed to buy the animal time. Feeding, stimulating and resurrecting all send it to the dead address, where it can never move again, and each of those burns is stored against the address that paid it. Circulating supply only falls, and it falls in proportion to how much anyone cares. (The token&apos;s 1% transfer tax applies to those transfers too; figures on this page are the amounts sent.)</p>
+          <p>$FLY is a BEP-20 with a 1% transfer tax, no owner and no mint. Its purpose is to be destroyed to create and sustain life. Minting a fly, feeding it, resurrecting it and breeding two of them all send $FLY to the dead address, where it can never move again, and every burn is stored against the address that paid it. Circulating supply only falls, and it falls in proportion to how much anyone cares. (The token&apos;s 1% transfer tax applies to those transfers too; figures on this page are the amounts sent.)</p>
         </div>
         <div className="cols3">
           <div>
             <h3 style={{ fontSize: 15, marginBottom: 8 }}>What it buys</h3>
             <table className="data" style={{ fontSize: 13 }}><tbody>
-              <tr><td>1 $FLY</td><td className="num mono">1 step of life</td></tr>
-              <tr><td>100 $FLY</td><td className="num mono">1 unit of stimulus</td></tr>
-              <tr><td>100,000 $FLY</td><td className="num mono">one resurrection</td></tr>
+              <tr><td>1 $FLY</td><td className="num mono">a new fly (mint)</td></tr>
+              <tr><td>1 $FLY</td><td className="num mono">1 second of life (feed)</td></tr>
+              <tr><td>1,000 $FLY + food</td><td className="num mono">one resurrection</td></tr>
+              <tr><td>5,000 $FLY</td><td className="num mono">one breeding</td></tr>
+              <tr><td>100 $FLY</td><td className="num mono">1 stimulus to the on-chain core</td></tr>
             </tbody></table>
           </div>
           <div>
@@ -148,9 +150,9 @@ export function TokenSection() {
             </tbody></table>
           </div>
           <div>
-            <h3 style={{ fontSize: 15, marginBottom: 8 }}>What the contract cannot do</h3>
-            <p className="serif dim" style={{ fontSize: 14.5, lineHeight: 1.55 }}>FlyBrain has no owner, no admin function, no upgrade path and no pause. Every dynamical parameter is immutable. FlyWorld&apos;s operator can only post checkpoints and report a death; it cannot touch anyone&apos;s tokens or change prices.</p>
-            <p style={{ marginTop: 12 }}><a className="btn sm" href={CFG.links.pancake + CFG.token} target="_blank" rel="noopener">Get $FLY</a></p>
+            <h3 style={{ fontSize: 15, marginBottom: 8 }}>What the contracts cannot do</h3>
+            <p className="serif dim" style={{ fontSize: 14.5, lineHeight: 1.55 }}>FlyRegistry has no upgrade path and no pause. Nobody can move a fly&apos;s tokens, change prices, rewrite a brain state, or transfer a fly that is dead. Only the body running a fly may write to it, and only forward. The curator can set a dormant fly&apos;s portrait and the collection&apos;s branding, nothing else. FlyBrain, the on-chain core, has no owner at all.</p>
+            <p style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}><a className="btn sm" href={CFG.links.pancake + CFG.token} target="_blank" rel="noopener">Get $FLY</a><a className="btn sm plain" href="/flies/">Mint a fly →</a></p>
           </div>
         </div>
       </div>

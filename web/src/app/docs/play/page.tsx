@@ -7,8 +7,18 @@ export default function Page() {
   return (
     <DocsShell current="/docs/play/">
       <h1>How to play</h1>
-      <p className="lede">Six actions. Each one touches real neurons. Each one is a transaction on BNB Smart Chain.</p>
-      <div className="callout"><b>You need:</b> a wallet on BNB Smart Chain (MetaMask, Rabby, Binance Wallet), a little BNB for gas, and <code>$FLY</code> for anything that feeds or pokes the fly. <a href={CFG.links.pancake + CFG.token}>Get $FLY on PancakeSwap</a>.</div>
+      <p className="lede">Own a fly, keep it alive, move it between bodies, bring it back when it dies. Then, separately, poke the on-chain core. Every action is a transaction on BNB Smart Chain.</p>
+      <div className="callout"><b>You need:</b> a wallet on BNB Smart Chain (MetaMask, Rabby, Binance Wallet), a little BNB for gas, and <code>$FLY</code> for anything that creates or sustains life. <a href={CFG.links.pancake + CFG.token}>Get $FLY on PancakeSwap</a>.</div>
+      <h2>Your fly</h2>
+      <table className="data"><thead><tr><th>Action</th><th>What happens</th><th>Cost</th></tr></thead><tbody>
+        <tr><td><a href="/flies/">Mint</a></td><td>A new fly with a fresh whole brain (139,248 neurons in the canonical resting state), an hour of life banked, and a portrait. It is yours: an ERC-721 you can hold or sell on <a href={`${CFG.opensea}/1`}>OpenSea</a>.</td><td>1 FLY, burned</td></tr>
+        <tr><td>Assign to a body</td><td>Hand it to the Arena (it streams live on the home page and forages for food) or to DOOM. The body downloads its last committed brain, checks the hash, and runs it. Only you, or the body running it, can do this.</td><td>gas</td></tr>
+        <tr><td>Feed</td><td>Seconds of life. In the arena that is food dropped near the fly; it has to smell its way there. Dormant flies bank it. Anyone may feed any fly.</td><td>1 FLY per second, burned</td></tr>
+        <tr><td>Resurrect</td><td>Only when dead. The same brain continues from exactly the state it died in, generation + 1. Until then the token cannot be transferred or sold.</td><td>1,000 FLY + food, burned</td></tr>
+        <tr><td>Breed</td><td>Two living flies you own produce a child, generation 0, with both parents in its lineage.</td><td>5,000 FLY, burned</td></tr>
+      </tbody></table>
+      <h2>The on-chain core</h2>
+      <p>Separately from the whole brain, a 155-neuron compass circuit runs entirely inside the EVM (<code>FlyBrain</code>). These actions touch those neurons directly:</p>
       <table className="data"><thead><tr><th>Action</th><th>What happens to the neurons</th><th>Cost</th></tr></thead><tbody>
         <tr><td><code>tick(steps)</code></td><td>Runs the brain forward up to 64 steps. Leak, integrate, threshold, spike, propagate. The compass bump decides where the fly walks.</td><td>gas only (~7M for 32 steps)</td></tr>
         <tr><td><code>feed(amount)</code></td><td>Adds <code>amount / 1 FLY</code> steps of energy. The fly burns one step per simulation step.</td><td>burned</td></tr>

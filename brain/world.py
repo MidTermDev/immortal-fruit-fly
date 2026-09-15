@@ -55,11 +55,19 @@ class World:
         for r in self.readouts: self.rates[r] = 0.0; self.base[r] = 0.0; self.slow[r] = 0.0
         self.log('born')
 
-    def log(self, text):
+    on_event = None   # optional hook(kind, text) for bodies that record interaction history
+
+    def log(self, text, kind=None):
         self.events.append((self.age_ms, text)); self.events = self.events[-50:]
+        if kind and self.on_event:
+            try: self.on_event(kind, text)
+            except Exception: pass
 
     # ---------------------------------------------------------------- food
+    FOOD_LIM = ARENA / 2 - 10   # food must be reachable: inside the walls (the fly is clamped to ±(ARENA/2 - 2))
+
     def place_food(self, x, y, energy, by=None, fid=None):
+        x = max(-self.FOOD_LIM, min(self.FOOD_LIM, float(x))); y = max(-self.FOOD_LIM, min(self.FOOD_LIM, float(y)))
         f = {'id': fid if fid is not None else self.next_food_id, 'x': float(x), 'y': float(y), 'energy': float(energy), 'energy0': float(energy), 'by': by}
         self.next_food_id = max(self.next_food_id, f['id'] + 1)
         self.food.append(f); self.log(f'food placed at ({x:.0f},{y:.0f}) worth {energy:.0f}s' + (f' by {by[:8]}' if by else ''))
@@ -156,7 +164,7 @@ class World:
             self._last_jump = self.age_ms; self.jumps += 1
             away = self.heading + math.pi if not self.predator else math.atan2(self.y - self.predator['y'], self.x - self.predator['x'])
             self.x += 12 * math.cos(away); self.y += 12 * math.sin(away); self.heading = away
-            self.log('giant fiber spike: jumped')
+            self.log('giant fiber spike: jumped', 'jumped')
         self.x += speed * math.cos(self.heading) * dt; self.y += speed * math.sin(self.heading) * dt
         # walls: turn away
         lim = ARENA / 2 - 2
@@ -168,13 +176,13 @@ class World:
         if on_food:
             bite = min(on_food['energy'], 6.0 * dt)   # eats 6 s of life per second
             on_food['energy'] -= bite; self.energy += bite; self.ate_total += bite
-            if on_food['energy'] <= 0.05: self.food.remove(on_food); self.log('finished a food item')
+            if on_food['energy'] <= 0.05: self.food.remove(on_food); self.log(f'finished a food item worth {on_food["energy0"]:.0f}s', 'ate')
         # predator
         self.age_ms += WORLD_MS; self.life_ms += WORLD_MS
         if self.predator:
             p = self.predator; p['x'] += p['vx'] * dt; p['y'] += p['vy'] * dt
             if math.hypot(p['x'] - self.x, p['y'] - self.y) < 2.5:
-                self.hits += 1; self.energy -= 60; self.log('caught by the predator: -60 s'); self.predator = None; self.next_predator_ms = self.age_ms + 45_000 + self.rng.random() * 60_000
+                self.hits += 1; self.energy -= 60; self.log('caught by the predator: -60 s', 'caught'); self.predator = None; self.next_predator_ms = self.age_ms + 45_000 + self.rng.random() * 60_000
             elif math.hypot(p['x'], p['y']) > ARENA:
                 self.predator = None; self.next_predator_ms = self.age_ms + 45_000 + self.rng.random() * 60_000
         elif self.age_ms >= self.next_predator_ms:
@@ -185,7 +193,7 @@ class World:
         # metabolism
         self.energy -= dt
         if self.energy <= 0:
-            self.energy = 0; self.alive = False; self.log('died: energy exhausted')
+            self.energy = 0; self.alive = False; self.log('died: energy exhausted', 'died')
         return ids
 
     def resurrect(self, energy):
@@ -212,6 +220,8 @@ class World:
         for k in ('rates', 'slow', 'base'):
             if k in d: getattr(self, k).update(d[k])
         self.food = [dict(f) for f in d.get('food', [])]; self.predator = None if not d.get('predator') else dict(d['predator'])
+        for f in self.food:   # food placed outside the walls by an earlier version is unreachable; pull it inside
+            f['x'] = max(-self.FOOD_LIM, min(self.FOOD_LIM, float(f['x']))); f['y'] = max(-self.FOOD_LIM, min(self.FOOD_LIM, float(f['y'])))
         self.path = [tuple(p) for p in d.get('path', [(self.x, self.y)])] or [(self.x, self.y)]; self.events = [tuple(e) for e in d.get('events', [])]
         if 'rng' in d: self.rng.bit_generator.state = d['rng']
 

@@ -24,9 +24,12 @@ import vizdoom as vzd
 from PIL import Image, ImageDraw, ImageFont
 from flysim import Circuit, FlyBrain as CoreSim, CH_CUE
 from sim import WholeBrain, DT
+from registry import Registry, REGISTRY, IDENTITY
 
 BRAIN = '0xee80f8cB5309C572343c38b5D717283BBBb517c5'
-ARCADE = os.environ.get('FLYARCADE', '0x3dE4fe3535dd9E1CC17b6718B985593e3E463279')
+FLY_ID = int(os.environ.get('FLY_ID', '1'))
+SNAPS = os.path.join(HERE, 'snapshots')
+MEMORY_ROOT = '0' * 64
 RPC = (open(os.path.join(HERE, 'rpc.txt')).read().strip() if os.path.exists(os.path.join(HERE, 'rpc.txt')) else 'https://bsc-dataseed.bnbchain.org')
 PK = os.environ.get('PRIVATE_KEY') or ('0x' + open(os.path.join(ROOT, 'deploy.txt')).read().strip())
 STEPS = 16; FPS = 10; W_VID, H_VID = 1280, 720
@@ -65,19 +68,19 @@ class Player:
         self.rates = {k: 0.0 for k in self.readouts}; self.slow = dict(self.rates); self.base = dict(self.rates)
         self.scene = {'scent_l': 0.0, 'scent_r': 0.0, 'loomL': 0.0, 'loomR': 0.0, 'sizeL': 0.0, 'sizeR': 0.0, 'lightL': 0.3, 'lightR': 0.3}
         self.steer = 0.0; self.fire_pending = 0; self.trigger_spikes = 0; self.chunk_ms = 50
-        self.lock = threading.Lock(); self.flock = threading.Lock(); self.running = True; self.hash_req = None
+        self.lock = threading.Lock(); self.slock = threading.Lock(); self.flock = threading.Lock(); self.running = True; self.hash_req = None
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
         b = self.b; ms = self.chunk_ms
         a = 1 - math.exp(-ms / 60.0); asl = 1 - math.exp(-ms / 300.0); ab = 1 - math.exp(-ms / 8000.0); ast = 1 - math.exp(-ms / 150.0)
         while self.running:
-            with self.lock: sc = dict(self.scene)
+            with self.slock: sc = dict(self.scene)
             rl, rr = 110 * sc['scent_l'], 110 * sc['scent_r']
             ids = [self.orn_l, self.orn_r, self.orn_rest, b.pops['R1-6_left'], b.pops['R1-6_right'], b.pops['LC4_left'], b.pops['LC4_right'], b.pops['LPLC2_left'], b.pops['LPLC2_right']]
             hz = [2 + rl, 2 + rr, 2, 3 + 25 * sc['lightL'], 3 + 25 * sc['lightR'], min(150, sc['loomL']), min(150, sc['loomR']), min(150, sc['sizeL']), min(150, sc['sizeR'])]
             b._ids = np.concatenate(ids).astype(np.int32); b._p = np.concatenate([np.full(len(i), h * DT / 1000, np.float32) for i, h in zip(ids, hz)]).astype(np.float32)
-            tot, win, _, _ = b.run(ms, record=False)
+            with self.lock: tot, win, _, _ = b.run(ms, record=False)
             for r in self.readouts:
                 inst = b.pop_rate(r, win, ms); self.rates[r] += a * (inst - self.rates[r]); self.slow[r] += asl * (inst - self.slow[r]); self.base[r] += ab * (self.slow[r] - self.base[r])
             S = self.slow
@@ -104,11 +107,17 @@ class Player:
         for br, sz, dsz in enemies:
             if br > 0: loomL += 6.0 * max(0.0, dsz); sizeL += 4.0 * sz
             else: loomR += 6.0 * max(0.0, dsz); sizeR += 4.0 * sz
-        with self.lock: self.scene.update(scent_l=min(1.2, cl), scent_r=min(1.2, cr), loomL=loomL, loomR=loomR, sizeL=sizeL, sizeR=sizeR, lightL=light_l, lightR=light_r)
+        with self.slock: self.scene.update(scent_l=min(1.2, cl), scent_r=min(1.2, cr), loomL=loomL, loomR=loomR, sizeL=sizeL, sizeR=sizeR, lightL=light_l, lightR=light_r)
 
     def take_fire(self):
         with self.flock: f = self.fire_pending > 0; self.fire_pending = 0
         return f
+
+    def load_state(self, path, expect_hash=None):
+        with self.lock:
+            self.b.load(path); h = self.b.state_hash()
+        if expect_hash and h != expect_hash: raise SystemExit(f'fetched brain {h[:12]} does not match the committed root {expect_hash[:12]}')
+        return h
 
     def snapshot_hash(self):
         """Hash of the whole brain at the next 50 ms chunk boundary (never a placeholder)."""
@@ -119,17 +128,32 @@ class Player:
         raise RuntimeError('brain thread did not answer the hash request')
 
 
-# ------------------------------------------------------------------ the chain: arcade log + on-chain compass core
+# ------------------------------------------------------------------ the chain: registry body + on-chain compass core
 class ChainLog:
     def __init__(self, player: Player):
-        self.player = player
+        self.player = player; self.reg = Registry(key_path=os.path.join(HERE, 'body_doom.key'))
         self.circuit = Circuit.load(os.path.join(ROOT, 'contracts', 'data', 'circuit.hex'))
         self.core = CoreSim(self.circuit, json.load(open(os.path.join(ROOT, 'contracts', 'data', 'params_v2.json'))), energy=10**9); self.core.record_ids = True
         self.TICKED = cast('keccak', 'Ticked(address,uint64,uint16,uint32,int32,int32,int64,int64,uint64)')
         self.sync_core()
-        self.q = queue.Queue(); self.inflight = {'decision': 0, 'core': 0}; self.decisions = []; self.core_txs = []; self.mismatch = 0; self.session = None; self.last_decision = None; self.last_core = None
-        self.raster = []
+        self.q = queue.Queue(); self.inflight = {'decision': 0, 'core': 0, 'commit': 0}; self.decisions = []; self.core_txs = []; self.commits = []; self.mismatch = 0; self.last_decision = None; self.last_core = None; self.last_commit = None
+        self.raster = []; self.energy = 0.0; self.fly = None
         threading.Thread(target=self._worker, daemon=True).start()
+
+    # ---- custody: instantiate the fly from its committed state, then accept
+    def take_custody(self):
+        f = self.reg.fly(FLY_ID); me = self.reg.address.lower()
+        if f['pendingBody'].lower() != me and f['body'].lower() != me: raise SystemExit(f"fly #{FLY_ID} is not assigned to this body ({self.reg.address}); run handoff.py first")
+        if f['stateURI']:
+            path = os.path.join(SNAPS, f"{f['stateRoot']}.npz")
+            if not os.path.exists(path):
+                cid = f['stateURI'].replace('ipfs://', ''); print('fetching brain state from', f['stateURI'])
+                subprocess.run(['curl', '-sL', '-m', '600', '-o', path, f'https://gateway.pinata.cloud/ipfs/{cid}'], check=True)
+            self.player.load_state(path, expect_hash=f['stateRoot'])
+            print(f"instantiated fly #{FLY_ID} from {f['stateURI']}: brain {f['stateRoot'][:12]} verified")
+        if f['pendingBody'].lower() == me: self.reg.accept(FLY_ID); print('accepted custody')
+        self.fly = self.reg.fly(FLY_ID); self.energy = float(self.fly['energy'])
+        self.reg.interaction(FLY_ID, 'doom', f'entered DOOM (defend the center) with {int(self.energy)} s of life')
 
     def sync_core(self):
         out = cast('call', '--rpc-url', RPC, BRAIN, 'brainState()(int16[],int8[],uint16[16],int32[],uint64,uint64,bool,uint32,int64,int64,int32,int32)').split('\n')
@@ -140,13 +164,7 @@ class ChainLog:
         st = cast('call', '--rpc-url', RPC, BRAIN, 'activeStimulus()(uint8,uint8,uint16,uint64,bool)').split('\n')
         c.stimChannel, c.stimParam, c.stimStrength, c.stimUntil = int(st[0]), int(st[1]), int(st[2]), int(st[3].split()[0])
 
-    def start(self, game):
-        h = self.player.snapshot_hash()
-        rc = send(ARCADE, 'startSession(string,bytes32,uint64)', game, '0x' + h['hash'], str(h['step']), gas=300000); self.session = int(cast('call', '--rpc-url', RPC, ARCADE, 'sessionCount()(uint256)').split()[0]) - 1
-        print('session', self.session, 'started in block', int(rc['blockNumber'], 16))
-
     def pending(self, kind): return self.inflight[kind]
-
     def put(self, job): self.inflight[job['kind']] += 1; self.q.put(job)
 
     def _worker(self):
@@ -155,9 +173,16 @@ class ChainLog:
             try:
                 if job['kind'] == 'decision':
                     h = job['h']
-                    rc = send(ARCADE, 'decide(uint256,bytes32,uint64,int16,bool,uint32,uint16,uint16,uint32)', str(self.session), '0x' + h['hash'], str(h['step']), str(job['turn']), 'true' if job['fire'] else 'false', str(h['spikes'] % (1 << 32)), str(job['kills']), str(max(0, job['health'])), str(job['tic']), gas=200000)
-                    d = {'n': len(self.decisions) + 1, 'tx': rc['transactionHash'], 'block': int(rc['blockNumber'], 16), 'hash': h['hash'], 'step': h['step'], 'turn': job['turn'], 'fire': job['fire'], 'kills': job['kills'], 'health': job['health'], 'gas': int(rc['gasUsed'], 16)}
+                    data = json.dumps({'n': len(self.decisions) + 1, 'brain': h['hash'], 'step': h['step'], 'turn': job['turn'], 'fire': job['fire'], 'kills': job['kills'], 'health': job['health'], 'tic': job['tic']}, separators=(',', ':'))
+                    rc = self.reg.interaction(FLY_ID, 'doom', data)
+                    d = {'n': len(self.decisions) + 1, 'tx': rc['transactionHash'].hex(), 'block': rc['blockNumber'], 'hash': h['hash'], 'step': h['step'], 'turn': job['turn'], 'fire': job['fire'], 'kills': job['kills'], 'health': job['health'], 'gas': rc['gasUsed']}
                     self.decisions.append(d); self.last_decision = d
+                elif job['kind'] == 'commit':
+                    path = job['path']; h = job['hash']; cid, uri = self.reg.pin_snapshot(path)
+                    muri = self._metadata(h, uri, job['step'])
+                    rc = self.reg.commit(FLY_ID, h, MEMORY_ROOT, uri, muri, job['step'], int(max(0, self.energy)), hashlib_root(self.decisions[-60:]))
+                    c = {'tx': rc['transactionHash'].hex(), 'block': rc['blockNumber'], 'hash': h, 'uri': uri, 'step': job['step']}; self.commits.append(c); self.last_commit = c
+                    print(f"commit {h[:12]} {uri} block {c['block']}")
                 elif job['kind'] == 'core':
                     wedge = job['wedge']; n0 = len(self.core.spike_lists)
                     try:
@@ -171,10 +196,9 @@ class ChainLog:
                             dd = l['data'][2:]; w = [int(dd[i:i + 64], 16) for i in range(0, len(dd), 64)]
                             ev = {'spikes': w[2], 'headX': s256(w[3]), 'headY': s256(w[4]), 'energy': w[7]}
                     if wedge is not None: self.core.stimulate(CH_CUE, wedge, 4)
-                    self.core.tick(STEPS); local_spikes = sum(len(s) for s in self.core.spike_lists[n0:])
+                    self.core.tick(STEPS); local_spikes = sum(len(x) for x in self.core.spike_lists[n0:])
                     ok = ev is not None and ev['headX'] == self.core.headX and ev['headY'] == self.core.headY and ev['spikes'] == local_spikes
-                    if not ok:
-                        self.mismatch += 1; self.sync_core()   # someone else ticked the contract; pick up its state again
+                    if not ok: self.mismatch += 1; self.sync_core()
                     self.raster += self.core.spike_lists[n0:]; self.raster = self.raster[-160:]
                     hx, hy = (ev['headX'], ev['headY']) if ev else (self.core.headX, self.core.headY)
                     t = {'tx': rc['transactionHash'], 'block': int(rc['blockNumber'], 16), 'gas': int(rc['gasUsed'], 16), 'wedge': wedge, 'spikes': ev['spikes'] if ev else 0, 'energy': ev['energy'] if ev else 0, 'ok': ok, 'angle': math.atan2(hy, hx) if (hx or hy) else None, 'mag': math.hypot(hx, hy)}
@@ -184,9 +208,38 @@ class ChainLog:
             finally:
                 self.inflight[job['kind']] -= 1; self.q.task_done()
 
-    def end(self):
-        try: send(ARCADE, 'endSession(uint256)', str(self.session), gas=100000)
-        except Exception as e: print('endSession failed', e)
+    def _metadata(self, h, uri, step):
+        """Token metadata for this commit: the state being committed, body DOOM, and the session so far."""
+        try:
+            if not getattr(self, 'portrait', ''): self.portrait = self.reg.portrait_uri(FLY_ID)
+            kills = max([d['kills'] for d in self.decisions] + [0])
+            muri, _ = self.reg.pin_metadata(FLY_ID, self.portrait, {'DOOM decisions': len(self.decisions), 'Best DOOM life (kills)': kills}, body_name='DOOM',
+                                            state={'stateRoot': h, 'stateURI': uri, 'brainStep': step, 'energy': int(max(0, self.energy)), 'alive': True})
+            return muri
+        except Exception as e:
+            print('metadata pin failed:', str(e)[:120]); return ''
+
+    def snapshot(self, tag):
+        """Save the whole brain (plus DOOM body state) content-addressed by its hash."""
+        import numpy as np, io
+        with self.player.lock:   # hash and bytes from the same instant
+            b = self.player.b; h = b.state_hash(); step = b.t
+            buf = io.BytesIO(); np.savez_compressed(buf, v=b.v, g=b.g, ref_until=b.ref_until, ring=b.ring, counts=b.counts, t=b.t, total=b.total_spikes, meta=json.dumps({'hash': h, 'tag': tag, 'brain_step': b.t, 'body': 'doom', 'fly_id': FLY_ID, 'registry': REGISTRY, 'connectome_sha256': IDENTITY['connectome_sha256'], 'saved_at': time.time()}))
+        path = os.path.join(SNAPS, f"{h}.npz"); open(path, 'wb').write(buf.getvalue()); return h, path, step
+
+    def hand_back(self, to_body):
+        """Final commit, then assign the fly to another body (the current body may do this)."""
+        self.q.join()
+        h, path, step = self.snapshot('handoff'); cid, uri = self.reg.pin_snapshot(path)
+        rc = self.reg.commit(FLY_ID, h, MEMORY_ROOT, uri, self._metadata(h, uri, step), step, int(max(0, self.energy)), hashlib_root(self.decisions[-60:]))
+        self.reg.interaction(FLY_ID, 'doom', f'left DOOM after {len(self.decisions)} decisions; brain {h[:12]} committed at {uri}')
+        self.reg.assign(FLY_ID, to_body); print(f'final commit {h[:12]} block {rc["blockNumber"]}; handed to {to_body}')
+        return h
+
+
+def hashlib_root(items):
+    import hashlib
+    return hashlib.sha256(json.dumps(items, sort_keys=True).encode()).hexdigest()
 
 
 # ------------------------------------------------------------------ video
@@ -211,7 +264,7 @@ class Recorder:
         img.paste(Image.fromarray(screen).resize((800, 600)), (0, 58))
         d.rectangle([0, 0, W_VID, 58], fill=(13, 15, 18)); d.line([0, 58, W_VID, 58], fill=(50, 54, 60))
         d.text((16, 9), 'THE WHOLE FLY BRAIN PLAYS DOOM', font=self.FH, fill=(232, 230, 224))
-        d.text((16, 36), '139,248 neurons · FlyWire connectome · every decision hashed to BNB Smart Chain · a 155-neuron core fires inside the EVM in sync', font=self.FS, fill=(139, 145, 156))
+        d.text((16, 36), f'fly #{FLY_ID} · 139,248 neurons · FlyWire connectome · brain state committed to the FlyRegistry on BNB Smart Chain · a 155-neuron core fires inside the EVM in sync', font=self.FS, fill=(139, 145, 156))
         x0 = 816; R = pl.rates
         # --- the player
         d.text((x0, 70), 'THE PLAYER · whole brain, real time', font=self.FB, fill=(240, 180, 41))
@@ -227,6 +280,8 @@ class Recorder:
         cy = y + 52; d.line([x0, cy - 8, W_VID - 16, cy - 8], fill=(40, 44, 50))
         d.text((x0, cy), 'ON BNB SMART CHAIN', font=self.FB, fill=(226, 52, 26))
         ld = ch.last_decision
+        lc0 = getattr(ch, 'last_commit', None)
+        if lc0: d.text((x0 + 250, cy + 2), f"last commit {lc0['hash'][:10]}… block {lc0['block']}", font=self.FS, fill=(139, 145, 156))
         if ld:
             d.text((x0, cy + 24), f"decision #{ld['n']}  block {ld['block']}", font=self.F, fill=(232, 230, 224))
             d.text((x0, cy + 42), f"brain hash {ld['hash'][:20]}…  step {ld['step']:,}", font=self.FS, fill=(139, 145, 156))
@@ -246,7 +301,7 @@ class Recorder:
             x = x0 + rw - (n - k) * cw
             for i in spikes: d.rectangle([x, ry0 + self.order[i] * rowh, x + max(1, cw * 0.85), ry0 + self.order[i] * rowh + max(1, rowh * 0.9)], fill=colors[self.types[i]])
         d.text((x0 + rw + 6, ry0), 'compass', font=self.FS, fill=(90, 96, 106)); d.text((x0 + rw + 6, ry0 + rh - 14), 'inhibit', font=self.FS, fill=(90, 96, 106))
-        d.text((16, H_VID - 30), f"on-chain: {len(ch.decisions)} decisions, {len(ch.core_txs)} core ticks, {sum(t['gas'] for t in ch.core_txs) + sum(x['gas'] for x in ch.decisions):,} gas, {400 * sum(1 for t in ch.core_txs if t['wedge'] is not None):,} $FLY burned   ·   {stats['elapsed']:.0f} s   ·   FlyArcade {ARCADE[:10]}…  FlyBrain {BRAIN[:10]}…", font=self.FS, fill=(139, 145, 156))
+        d.text((16, H_VID - 30), f"on-chain: {len(ch.decisions)} decisions, {len(getattr(ch, 'commits', []))} brain commits, {len(ch.core_txs)} core ticks, {400 * sum(1 for t in ch.core_txs if t['wedge'] is not None):,} $FLY burned   ·   life left {max(0, ch.energy):.0f} s   ·   {stats['elapsed']:.0f} s   ·   FlyRegistry {REGISTRY[:10]}…  FlyBrain {BRAIN[:10]}…", font=self.FS, fill=(139, 145, 156))
         self.proc.stdin.write(img.tobytes()); self.n += 1
 
     def close(self): self.proc.stdin.close(); self.proc.wait()
@@ -254,12 +309,12 @@ class Recorder:
 
 # ------------------------------------------------------------------ main
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--minutes', type=float, default=5); ap.add_argument('--out', default=os.path.join(HERE, 'doom_run')); ap.add_argument('--scenario', default='defend_the_center.cfg'); ap.add_argument('--no-chain', action='store_true'); ap.add_argument('--decision-every', type=float, default=1.2); ap.add_argument('--core-every', type=float, default=1.5)
+    ap = argparse.ArgumentParser(); ap.add_argument('--minutes', type=float, default=5); ap.add_argument('--out', default=os.path.join(HERE, 'doom_run')); ap.add_argument('--scenario', default='defend_the_center.cfg'); ap.add_argument('--no-chain', action='store_true'); ap.add_argument('--decision-every', type=float, default=1.2); ap.add_argument('--core-every', type=float, default=1.5); ap.add_argument('--commit-every', type=float, default=60); ap.add_argument('--hand-back', default=None, help='body address to hand the fly to at the end (default: the arena)')
     a = ap.parse_args()
     pl = Player(); print('whole brain up'); time.sleep(2)
     ch = None if a.no_chain else ChainLog(pl)
     rec = Recorder(a.out, ch.circuit if ch else Circuit.load(os.path.join(ROOT, 'contracts', 'data', 'circuit.hex')))
-    if ch: ch.start('DOOM · ' + a.scenario.replace('.cfg', ''))
+    if ch: ch.take_custody()
 
     g = vzd.DoomGame(); g.load_config(os.path.join(vzd.scenarios_path, a.scenario))
     g.set_window_visible(False); g.set_screen_resolution(vzd.ScreenResolution.RES_640X480); g.set_screen_format(vzd.ScreenFormat.RGB24)
@@ -268,7 +323,7 @@ def main():
     g.set_available_buttons([vzd.Button.TURN_LEFT_RIGHT_DELTA, vzd.Button.ATTACK]); g.set_episode_timeout(100000); g.set_mode(vzd.Mode.PLAYER); g.init(); g.new_episode(); g.send_game_command('give ammo')
 
     t0 = time.time(); prev = {}; stats = {'turn': 0, 'fire_flash': 0, 'enemies': 0, 'kills': 0, 'health': 100.0, 'elapsed': 0, 'toward': 0, 'away': 0}; episodes = 1
-    next_dec = time.time() + 2; next_core = time.time() + 3; fired_since = False; turn_acc = 0
+    next_dec = time.time() + 2; next_core = time.time() + 3; next_commit = time.time() + a.commit_every; fired_since = False; turn_acc = 0; last_energy_t = time.time()
     while time.time() - t0 < a.minutes * 60:
         if g.is_episode_finished(): episodes += 1; g.new_episode(); g.send_game_command('give ammo'); prev.clear(); continue
         if int((time.time() - t0) * FPS) % (FPS * 15) == 0: g.send_game_command('give ammo')
@@ -299,23 +354,29 @@ def main():
         # --- chain
         if ch:
             now = time.time()
-            if now >= next_dec and ch.session is not None and ch.pending('decision') == 0:
+            if now >= next_dec and ch.pending('decision') == 0:
                 h = pl.snapshot_hash()   # the hash of the brain at the moment of this decision, whatever block it lands in
                 ch.put({'kind': 'decision', 'h': h, 'turn': max(-32768, min(32767, turn_acc)), 'fire': fired_since, 'kills': stats['kills'], 'health': int(stats['health']), 'tic': s.number}); turn_acc = 0; fired_since = False; next_dec = now + a.decision_every
+            ch.energy -= now - last_energy_t; last_energy_t = now
+            if now >= next_commit and ch.pending('commit') == 0:
+                h, path, step = ch.snapshot('checkpoint'); ch.put({'kind': 'commit', 'hash': h, 'path': path, 'step': step}); next_commit = now + a.commit_every
             if now >= next_core and ch.pending('core') == 0:
                 threat = max(en, key=lambda e: e[1]) if en else None
                 ch.put({'kind': 'core', 'wedge': None if threat is None else int(round(threat[0] / (2 * math.pi / 16))) % 16}); next_core = now + a.core_every
         rec.frame(s.screen_buffer, pl, ch or _NoChain(), stats)
     g.close(); rec.close()
-    if ch: ch.q.join(); ch.end()
+    final_hash = None
+    if ch:
+        to = a.hand_back or open(os.path.join(HERE, 'body_arena.address')).read().strip()
+        final_hash = ch.hand_back(to)
     pl.running = False
-    summary = {'minutes': a.minutes, 'episodes': episodes, 'kills': stats['kills'], 'trigger_spikes': pl.trigger_spikes, 'turn_toward_frames': stats['toward'], 'turn_away_frames': stats['away'], 'decisions': ch.decisions if ch else [], 'core_txs': ch.core_txs if ch else [], 'core_replay_mismatches': ch.mismatch if ch else None, 'session': ch.session if ch else None, 'arcade': ARCADE, 'brain': BRAIN}
+    summary = {'fly_id': FLY_ID, 'registry': REGISTRY, 'final_hash': final_hash, 'commits': ch.commits if ch else [], 'minutes': a.minutes, 'episodes': episodes, 'kills': stats['kills'], 'trigger_spikes': pl.trigger_spikes, 'turn_toward_frames': stats['toward'], 'turn_away_frames': stats['away'], 'decisions': ch.decisions if ch else [], 'core_txs': ch.core_txs if ch else [], 'core_replay_mismatches': ch.mismatch if ch else None, 'brain': BRAIN}
     json.dump(summary, open(os.path.join(a.out, 'run.json'), 'w'), indent=1)
     print(f"done: kills {stats['kills']}, {len(summary['decisions'])} decisions on-chain, {len(summary['core_txs'])} core ticks ({summary['core_replay_mismatches']} replay mismatches), video {os.path.join(a.out, 'doom_fly.mp4')}")
 
 
 class _NoChain:
-    decisions = []; core_txs = []; last_decision = None; last_core = None; raster = []
+    decisions = []; core_txs = []; commits = []; last_decision = None; last_core = None; last_commit = None; raster = []; energy = 0.0
 
 
 if __name__ == '__main__':

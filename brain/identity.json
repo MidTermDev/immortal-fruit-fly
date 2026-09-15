@@ -1,0 +1,7 @@
+{
+ "connectome_sha256": "385a129a6d46223dd0c2f170544d3e49c192e458ede71321fc74e128f817dcb3",
+ "genesis_state_sha256": "1e31bb6f59b798926cc625e31b04718360cec316d0a62c89d7aa3e1e264ecc73",
+ "model": 2,
+ "neurons": 139248,
+ "edges": 2700429
+}

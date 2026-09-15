@@ -1,6 +1,6 @@
 # Immortal Fruit Fly — the plan
 
-*15 September 2026. This replaces the ad-hoc roadmap. It says what "immortal fruit flies on BNB Chain" means, what we have, what is wrong with it, and the order to build the real thing.*
+*15 September 2026. This replaces the ad-hoc roadmap. It says what "immortal fruit flies on BNB Chain" means, what we have, what is wrong with it, and the order to build the real thing. Status notes in **[brackets]** were added the same day as steps shipped.*
 
 ## 1. What the words mean
 
@@ -50,7 +50,7 @@ struct Fly {
     uint256 parentA; uint256 parentB;   // 0 for genesis flies
     bytes32 stateRoot;       // sha256 of the full brain state at the last commit
     bytes32 memoryRoot;      // sha256 of the plastic weights (learned memory)
-    string  stateURI;        // where the bytes are (Greenfield object; see 3.2)
+    string  stateURI;        // where the bytes are (ipfs://…; see 3.2)
     uint64  brainStep;       // model step at the last commit
     uint64  energy;          // seconds of life at the last commit
     address body;            // the operator currently running it, or 0 if dormant
@@ -63,22 +63,26 @@ Functions, and who may call them:
 
 | Function | Who | What it does |
 |---|---|---|
-| `mint(string name) → id` | anyone, burns **1 $FLY** | A new genesis fly: fresh brain (canonical resting state), empty memory, generation 0. |
+| `mint(string name) → id` | anyone, burns **1 $FLY** | A new genesis fly: fresh brain (canonical resting state), empty memory, generation 0, 3,600 s of life banked. Supply capped at **10,000**. |
 | `registerBody(string name, string uri)` | anyone | Declares an operator that can host flies (arena, DOOM, RuneScape, a robot). |
-| `assign(id, body)` | the fly's owner | Hands a dormant or living fly to a body. The body must accept (`accept(id)`) before it may commit. |
+| `assign(id, body)` | the fly's owner, **or the body currently running it** | Hands a dormant or living fly to a body. The body must accept (`accept(id)`) before it may commit. |
 | `commit(id, stateRoot, memoryRoot, uri, step, energy, historyRoot)` | the assigned body | A checkpoint. `historyRoot` commits the interaction log for the interval. |
 | `interaction(id, kind, data)` | the assigned body | Notable events, as they happen (ate, jumped, killed, met #n). This is the interaction history. |
 | `died(id, stateRoot, memoryRoot, uri, cause)` | the assigned body | Final state. Fly becomes dormant; `body = 0`. |
-| `resurrect(id, energy)` | anyone, burns $FLY (1 $FLY = 1 s… price to set) | Marks it alive with energy; the owner then assigns a body, which instantiates it from `stateURI`. |
-| `feed(id, amount)` | anyone, burns $FLY | Adds energy; the body applies it at its next poll. |
-| `breed(a, b, childMemoryRoot, uri) → id` | owner of both, burns $FLY | Child fly: genesis brain, memory = published deterministic crossover of the parents' memories (computed off-chain, committed with both parent roots so anyone can check). |
+| `resurrect(id, seconds)` | anyone, burns **1,000 $FLY + seconds × 1 $FLY** (≥ 60 s) | Marks it alive with energy, generation + 1; the owner then assigns a body, which instantiates it from `stateURI`. |
+| `feed(id, seconds)` | anyone, burns **1 $FLY per second** | Adds energy; the body applies it at its next poll (the arena drops it as food the fly must find). |
+| `breed(a, b, childMemoryRoot, name) → id` | owner of both, both alive, burns **5,000 $FLY** | Child fly: genesis brain, both parents in its lineage; memory = published deterministic crossover of the parents' memories once plasticity exists (3.6). |
 | `attest(id, step, stateRoot)` | registered attestors | An independent re-runner confirming a commit (see 3.4). |
 
-Rules the contract enforces: a fly has at most one body; only that body commits; commits must advance `brainStep`; a dead fly cannot be committed; `stateRoot` can only change through a commit or a death. Nothing in the contract can be upgraded and nothing moves anyone's tokens except the burns the caller asks for.
+Rules the contract enforces: a fly has at most one body; only that body commits; commits must advance `brainStep`; a dead fly cannot be committed; **a dead fly cannot be transferred or sold** until resurrected; `stateRoot` can only change through a commit or a death. ERC-2981 royalty 2.5%. A curator can set a dormant fly's portrait and the collection's `contractURI`, nothing else. Nothing in the contract can be upgraded and nothing moves anyone's tokens except the burns the caller asks for.
+
+**[Shipped: `FlyRegistry` at `0x0eeB0A675720306Ef6f426Bd8560c1288848f813`, verified. Collection "Immortal Fruit Flies" (FLYS).]**
 
 ### 3.2 Brain state on a permanent layer
 
-Snapshots (~12 MB) go to **BNB Greenfield** (BNB Chain's object storage; the natural fit, and the story stays on BNB). Each object is named by its sha256, so the registry's `stateRoot` is also its address. Fallback mirror: IPFS pin. The tunnel-hosted snapshots stop being the source of truth; they can remain a cache.
+Snapshots (~12 MB) are pinned to **IPFS** (Pinata) by the body at every commit, and the registry's `stateURI` is the `ipfs://` CID while `stateRoot` is the sha256 of the bytes, so any body verifies what it downloads. Token metadata (portrait, status, energy, brain step, body, lineage) is re-pinned with every commit so OpenSea shows the fly as it is. **BNB Greenfield** is the planned mirror (the BNB-native story; needs a funded Greenfield account). The tunnel-hosted snapshots are only a cache.
+
+**[Shipped: IPFS via the body keys; fly #1's commits and hand-offs fetched and hash-verified from IPFS on mainnet.]**
 
 What a snapshot contains (already true of the current format): brain arrays, the full world/body state needed to continue, the plastic weights, and the brain step at which every on-chain event was applied. `verify.py` already replays one into the next bit for bit; that becomes the reference verifier.
 
@@ -116,11 +120,11 @@ Everything that creates or sustains life burns $FLY: mint 1, feed, resurrect, br
 
 Each step is shippable and leaves the live fly running.
 
-1. **`FlyRegistry` + migration.** Write, test (Foundry, including a replay of fly #1's real history), deploy. Mint fly #1 for Specimen 001 with its current whole-brain state as genesis; fold FlyWorld's checkpoints and FlyArcade's session 5 into its history as `interaction` events; retire FlyWorld/FlyArcade to read-only.
-2. **Permanent storage.** Greenfield bucket for snapshots (operator key), upload on every commit, `stateURI = gnfd://…`; IPFS mirror. Update `verify.py` to fetch by URI.
-3. **Body SDK + the arena as its first body.** Refactor `server.py` into `bodies/arena` on the SDK; commits and interactions go to the registry. Death → dormant; resurrect → assign → instantiate. Demonstrate the loop: let fly #1 starve in the arena, resurrect it, and wake it up **in DOOM**, then back in the arena, with hashes matching across the move.
+1. **`FlyRegistry` + migration.** Write, test (Foundry, including a replay of fly #1's real history), deploy. Mint fly #1 for Specimen 001 with its current whole-brain state as genesis; fold FlyWorld's checkpoints and FlyArcade's session 5 into its history as `interaction` events; retire FlyWorld/FlyArcade to read-only. **[Done.]**
+2. **Permanent storage.** IPFS pin on every commit, `stateURI = ipfs://…`; Greenfield mirror later. **[Done, IPFS.]**
+3. **The arena and DOOM as bodies.** `server.py` and `doom.py` speak the registry protocol: accept, instantiate (fetch + verify), commit, interactions, death. Demonstrate the loop: fly #1 arena → DOOM → arena with hashes matching across the move. **[Done on mainnet.]** The Body SDK (packaging the loop for others) is still to do.
 4. **Per-fly on-chain core.** `FlyCore` keyed by registry id; the arena and DOOM bodies cue it; the commit carries its heading.
-5. **Minting for everyone.** Site: mint (1 $FLY), your flies, assign to a body, feed, resurrect; a fly page with its lineage tree, its history across bodies, its live stream when a body is running it. Then the arena hosts many flies at once (same brain kernel, time-sliced; ~50 flies per machine).
+5. **Minting for everyone.** Site: mint (1 $FLY), your flies, assign to a body, feed, resurrect, breed; a fly page with its lineage, its history across bodies, its live stream when the arena is running it; OpenSea branding (`contractURI`, per-token metadata). **[Done.]** Then the arena hosts many flies at once (same brain kernel, time-sliced; ~50 flies per machine). **[To do.]**
 6. **Attestors.** Publish the re-runner; run two independent ones ourselves; show attestation counts.
 7. **Memory.** Mushroom-body plasticity in the model, `memoryRoot`, `breed`.
 8. **More bodies.** RuneScape (the copied world), and an open call for robots. DOOM stays as the demo body.
@@ -131,9 +135,9 @@ Each step is shippable and leaves the live fly running.
 - No more state on a temporary URL.
 - No claims the code does not make true. The verification ladder is documented as the ladder it is.
 
-## 6. Open decisions (need your call)
+## 6. Decisions (made 15 September 2026)
 
-1. **Mint price 1 $FLY, resurrect and feed prices** (currently 100k and 1 $FLY/s in FlyWorld; suggest resurrect 1,000, feed 1/s, breed 5,000).
-2. **Who may assign a fly to a body**: owner only (proposed), or also the current body (hand-offs).
-3. **Greenfield vs IPFS** as primary. Greenfield is the BNB-native story and costs are trivial at 12 MB per commit; it needs a Greenfield account funded with BNB.
-4. Whether fly #1's earlier records (FlyWorld checkpoints, FlyArcade sessions 0–4 with placeholder hashes) are imported as history or left as archaeology. I'd import sessions 5 and the checkpoints, and mark 0–4 as void.
+1. **Prices:** mint 1 $FLY, feed 1 $FLY/s, resurrect 1,000 $FLY + food, breed 5,000 $FLY. Max supply 10,000.
+2. **Who may assign:** the owner **or** the body currently running the fly (so bodies can hand off).
+3. **Storage:** IPFS (Pinata) now; Greenfield as a mirror later.
+4. **Fly #1's records:** start with DOOM session 5 and the FlyWorld checkpoints, recorded as `interaction` events on the registry; sessions 0–4 are void.

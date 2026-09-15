@@ -10,18 +10,53 @@ export default function Page() {
       <h1>Contracts &amp; addresses</h1>
       <p className="lede">Everything is on BNB Smart Chain (chain ID 56). Sources are verified on BscScan and on Sourcify as exact matches.</p>
       <table className="data"><thead><tr><th>Contract</th><th>Address</th></tr></thead><tbody>
-        <tr><td><code>$FLY</code> token (Immortal Fruit Flies)</td><td><a href={`${ex}/token/${CFG.token}`}>{CFG.token}</a></td></tr>
-        <tr><td><code>FlyWorld</code>, the whole-brain fly&apos;s arena (food, checkpoints, lineage)</td><td><a href={`${ex}/address/${CFG.world}`}>{CFG.world}</a> · <a href={CFG.links.sourcify + CFG.world}>source</a></td></tr>
-        <tr><td><code>FlyArcade</code>, the log of the whole brain playing games (brain hash per decision)</td><td><a href={`${ex}/address/${CFG.arcade}`}>{CFG.arcade}</a></td></tr>
+        <tr><td><code>FlyRegistry</code>, the organism: ERC-721 “Immortal Fruit Flies” (FLYS), identity, brain state, memory, lineage, history</td><td><a href={`${ex}/address/${CFG.registry}#code`}>{CFG.registry}</a> · <a href={`${CFG.opensea}/1`}>OpenSea</a></td></tr>
+        <tr><td>Arena body (streams the live fly)</td><td><a href={`${ex}/address/${CFG.bodies.arena}`}>{CFG.bodies.arena}</a></td></tr>
+        <tr><td>DOOM body</td><td><a href={`${ex}/address/${CFG.bodies.doom}`}>{CFG.bodies.doom}</a></td></tr>
+        <tr><td><code>$FLY</code> token</td><td><a href={`${ex}/token/${CFG.token}`}>{CFG.token}</a></td></tr>
+        <tr><td><code>FlyWorld</code>, fly #1&apos;s arena before the registry (read-only now)</td><td><a href={`${ex}/address/${CFG.world}`}>{CFG.world}</a> · <a href={CFG.links.sourcify + CFG.world}>source</a></td></tr>
+        <tr><td><code>FlyArcade</code>, fly #1&apos;s DOOM session 5 (read-only now)</td><td><a href={`${ex}/address/${CFG.arcade}`}>{CFG.arcade}</a></td></tr>
         <tr><td><code>FlyBrain</code> v2, the on-chain compass core (live)</td><td><a href={`${ex}/address/${CFG.brain}`}>{CFG.brain}</a> · <a href={CFG.links.sourcify + CFG.brain}>source</a></td></tr>
         <tr><td>Circuit table v2 (SSTORE2 data contract)</td><td><a href={`${ex}/address/${CFG.circuitPtr}`}>{CFG.circuitPtr}</a></td></tr>
         <tr><td><code>FlyBrain</code> v1 (first fly, retired)</td><td><a href={`${ex}/address/${CFG.brainV1}`}>{CFG.brainV1}</a> · <a href={CFG.links.sourcify + CFG.brainV1}>source</a></td></tr>
         <tr><td>Keeper / deployer</td><td><a href={`${ex}/address/${CFG.deployer}`}>{CFG.deployer}</a></td></tr>
       </tbody></table>
       <div className="callout"><b>v1 → v2.</b> The first fly dropped pending synaptic input at the end of each tick, so a bump could not survive between ticks. v2 keeps it in storage, has a Yul inner loop (about 2.3× cheaper), and parameters calibrated across several trajectories. v1 stays on-chain as the first organism; its lineage is a fossil.</div>
+      <h2>FlyRegistry interface</h2>
+      <p>One contract is the permanent layer. A fly is a token; everything about it lives here or is anchored here. Bodies (an arena, a game, a robot) register, get assigned a fly, accept it, and are then the only address that can write its brain state, and only forward.</p>
+      <pre><code>{`struct Fly { bytes32 connectome; uint32 model; uint32 generation; uint32 deaths; uint256 parentA; uint256 parentB;
+             bytes32 stateRoot; bytes32 memoryRoot; string stateURI; uint64 brainStep; uint64 energy;
+             uint64 bornBlock; uint64 lastCommitBlock; address body; address pendingBody; bool alive; }
+
+function mint(string name) returns (uint256 id);               // anyone; burns MINT_PRICE (1 FLY); fresh genesis brain; max 10,000
+function feed(uint256 id, uint64 seconds_);                    // anyone; burns seconds × FEED_PER_SECOND (1 FLY/s)
+function resurrect(uint256 id, uint64 seconds_);               // anyone; only when dead; burns RESURRECT_PRICE (1,000) + food; generation + 1
+function breed(uint256 a, uint256 b, bytes32 childMemoryRoot, string name) returns (uint256 id); // owner of both, both alive; burns 5,000
+function registerBody(string name, string uri);                // anyone; a body announces itself (the arena puts its live-stream URL here)
+function assign(uint256 id, address body);                     // the owner, or the body currently running it
+function accept(uint256 id); function release(uint256 id);     // the body
+function commit(uint256 id, bytes32 stateRoot, bytes32 memoryRoot, string stateURI, string metadataURI, uint64 brainStep, uint64 energy, bytes32 historyRoot); // the body; step must advance
+function interaction(uint256 id, bytes32 kind, string data);   // the body: ate, jumped, doom decision, met #n …
+function died(uint256 id, bytes32 stateRoot, bytes32 memoryRoot, string stateURI, string metadataURI, uint64 brainStep, string cause); // the body
+function attest(uint256 id, uint64 brainStep, bytes32 stateRoot); // anyone who replayed it
+function setMetadata(uint256 id, string uri);                   // curator, only while no body runs the fly (portraits)
+
+event Minted(uint256 indexed id, address indexed to, string name, uint256 parentA, uint256 parentB);
+event Fed(uint256 indexed id, address indexed by, uint64 seconds_, uint256 tokensBurned);
+event Resurrected(uint256 indexed id, address indexed by, uint32 generation, uint64 energy, uint256 tokensBurned);
+event Assigned / Accepted / Released (uint256 indexed id, address indexed body …);
+event Commit(uint256 indexed id, address indexed body, bytes32 stateRoot, bytes32 memoryRoot, string stateURI, uint64 brainStep, uint64 energy, bytes32 historyRoot);
+event Interaction(uint256 indexed id, address indexed body, bytes32 indexed kind, string data);
+event Died(uint256 indexed id, address indexed body, uint32 generation, bytes32 stateRoot, bytes32 memoryRoot, string stateURI, uint64 brainStep, string cause);
+event Attested(uint256 indexed id, address indexed attestor, uint64 brainStep, bytes32 stateRoot, bool matches);`}</code></pre>
+      <p>Rules the contract enforces: a fly has at most one body; only that body commits, and only forward; a dead fly cannot be committed and <b>cannot be transferred or sold</b> until resurrected; breeding needs two living flies; supply stops at 10,000. Snapshots are pinned to IPFS and named by their sha256, which is the <code>stateRoot</code>, so any body can fetch, verify and continue a fly. ERC-2981 royalty: 2.5% to the operator on secondary sales. Nothing is upgradeable; the curator can only set dormant flies&apos; portraits and the collection&apos;s branding.</p>
+      <h2>Constants of the registry</h2>
+      <table className="data"><tbody>
+        <tr><td>MINT_PRICE</td><td>1 FLY</td></tr><tr><td>FEED_PER_SECOND</td><td>1 FLY</td></tr><tr><td>RESURRECT_PRICE</td><td>1,000 FLY (+ at least 60 s of food)</td></tr><tr><td>BREED_PRICE</td><td>5,000 FLY</td></tr><tr><td>GENESIS_ENERGY</td><td>3,600 s</td></tr><tr><td>MAX_SUPPLY</td><td>10,000</td></tr><tr><td>CONNECTOME</td><td>sha256 of the FlyWire 783 connectome build (see <code>brain/identity.json</code>)</td></tr><tr><td>MODEL</td><td>2 (Shiu et al. 2024 parameters, <code>brain/sim.py</code>)</td></tr>
+      </tbody></table>
       <h2>$FLY</h2>
       <p>A BEP-20 with 1,000,000,000 supply, 18 decimals and a 1% transfer tax; ownership renounced; EIP-2612 permit. It has no burn function, so the fly “burns” by transferring to <code>0x000000000000000000000000000000000000dEaD</code>. <code>FlyBrain.totalBurned()</code> counts what the fly has eaten.</p>
-      <h2>FlyWorld interface</h2>
+      <h2>FlyWorld interface (historical)</h2>
       <pre><code>{`function placeFood(int32 x, int32 y, uint256 amount) external returns (uint256 id); // burns $FLY; 1 $FLY = 1 s of life, min 60
 function resurrect(uint256 extraFood) external;                                      // only when dead; burns 50,000 $FLY + extraFood
 function checkpoint(uint64 step, uint64 ageMs, bytes32 stateHash, int32 x, int32 y, uint64 energy, uint64 spikes, string snapshotURI); // operator
@@ -68,7 +103,7 @@ event Resurrected(uint32 indexed generation, address indexed by, uint256 tokensB
       <pre><code>{`git clone ${CFG.links.github}
 cd immortal-fruit-fly/contracts
 forge install foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts@v5.1.0 --no-git
-forge test -vv        # 19 tests incl. the mainnet replay`}</code></pre>
+forge test -vv        # 28 tests incl. the mainnet replay and the immortality loop (die in the arena, wake in DOOM)`}</code></pre>
     </DocsShell>
   );
 }

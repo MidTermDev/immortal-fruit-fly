@@ -7,7 +7,7 @@ evm_version = "cancun"
 optimizer = true
 optimizer_runs = 10_000
 via_ir = true
-fs_permissions = [{ access = "read", path = "./data" }]
+fs_permissions = [{ access = "read", path = "./data" }, { access = "read", path = "../brain/identity.json" }, { access = "read", path = "../brand/collection_cid.txt" }]
 
 [rpc_endpoints]
 bsc = "${BSC_RPC_URL}"

@@ -1,17 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { ethers } from "ethers";
 import { CFG } from "@/lib/config";
+import Link from "next/link";
 import { Chain } from "@/lib/chain";
 import { BrainLive } from "@/lib/brain3d";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, status, bodyName } from "@/lib/registry";
+import { RecordList } from "@/components/Record";
 
-const fmt = (n: number | bigint) => Number(n).toLocaleString("en-US");
-const short = (a?: string | null) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "—");
-const fmtTok = (wei: bigint, d = 0) => { try { return Number(ethers.formatEther(wei)).toLocaleString("en-US", { maximumFractionDigits: d }); } catch { return "0"; } };
-const hms = (s: number) => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min ${s % 60} s`; };
-
+const FLY_ID = 1;
 type Frame = { hdr: any; spikes: Uint16Array };
-type Ev = { name: string; args: any; block: number; tx: string };
 
 export default function LiveFly() {
   const brainRef = useRef<HTMLCanvasElement>(null);
@@ -22,11 +19,11 @@ export default function LiveFly() {
   const [h, setH] = useState<any>(null);            // latest header from the live server
   const [live, setLive] = useState<"connecting" | "live" | "offline">("connecting");
   const [origin, setOrigin] = useState<string>(CFG.liveFallback);
-  const [info, setInfo] = useState<any>(null);
+  const [fly, setFly] = useState<FlyRecord | null>(null);
+  const [reg, setReg] = useState<RegistryInfo | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [wallet, setWallet] = useState<string | null>(null);
   const [bal, setBal] = useState("");
-  const [pick, setPick] = useState<{ x: number; y: number } | null>(null);
   const [amount, setAmount] = useState("600");
   const [resFood, setResFood] = useState("1800");
   const [busy, setBusy] = useState(false);
@@ -63,10 +60,10 @@ export default function LiveFly() {
       let org = CFG.liveFallback;
       try {
         const ch = await new Chain().connectRead(); chainRef.current = ch;
-        const [wi, evs] = await Promise.all([ch.worldInfo(), ch.worldEvents(40000)]);
-        setInfo(wi); setEvents(evs.slice(0, 60));
-        const o = ch.liveOrigin(evs); if (o) org = o;
-        poll = setInterval(async () => { try { const evs2 = await ch.worldEvents(40000); setEvents(evs2.slice(0, 60)); setInfo(await ch.worldInfo()); const o2 = ch.liveOrigin(evs2); if (o2 && o2 !== orgRef.current) { setOrigin(o2); connect(o2); } } catch {} }, 60000);
+        // The arena body announces its live stream origin in bodies(arena).uri; a fly's whole record is on the registry.
+        const read = async () => { const [rec, ri, evs, body] = await Promise.all([ch.flyRecord(FLY_ID), ch.registryInfo(), ch.registryEvents(40000, FLY_ID), ch.bodyInfo(CFG.bodies.arena)]); setFly(rec); setReg(ri); setEvents(evs); return /^https:\/\//.test(body.uri) ? new URL(body.uri).origin : ""; };
+        const o = await read(); if (o) org = o;
+        poll = setInterval(async () => { try { const o2 = await read(); if (o2 && o2 !== orgRef.current) { setOrigin(o2); connect(o2); } } catch {} }, 60000);
       } catch (e) { console.warn("chain unavailable", e); }
       setOrigin(org); connect(org);
     })();
@@ -85,8 +82,6 @@ export default function LiveFly() {
       // odor plumes
       for (const fd of hd.food) { const [x, y] = P(fd.x, fd.y); const frac = fd.energy / Math.max(1, fd.energy0); const grd = g.createRadialGradient(x, y, 0, x, y, 30 * 2.2 * sc); grd.addColorStop(0, `rgba(240,180,41,${0.10 + 0.25 * frac})`); grd.addColorStop(1, "rgba(240,180,41,0)"); g.fillStyle = grd; g.beginPath(); g.arc(x, y, 30 * 2.2 * sc, 0, 7); g.fill(); }
       for (const fd of hd.food) { const [x, y] = P(fd.x, fd.y); g.fillStyle = "#f0b429"; g.beginPath(); g.arc(x, y, Math.max(3, 3 * sc), 0, 7); g.fill(); g.fillStyle = "rgba(232,230,224,0.55)"; g.font = `${Math.round(9 * dpr)}px ui-monospace, monospace`; g.textAlign = "left"; g.fillText(`${Math.round(fd.energy)} s`, x + 6 * dpr, y - 5 * dpr); }
-      // pick
-      if (pick) { const [x, y] = P(pick.x, pick.y); g.strokeStyle = "#f0b429"; g.setLineDash([3 * dpr, 3 * dpr]); g.beginPath(); g.arc(x, y, 8 * dpr, 0, 7); g.stroke(); g.setLineDash([]); }
       // predator
       if (hd.predator) { const [x, y] = P(hd.predator.x, hd.predator.y); g.fillStyle = "rgba(88,196,245,0.8)"; g.beginPath(); g.arc(x, y, Math.max(4, hd.predator.size * sc), 0, 7); g.fill(); }
       // path (from server: only current position; draw a trail we keep locally)
@@ -103,41 +98,30 @@ export default function LiveFly() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const arenaClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const c = e.currentTarget, r = c.getBoundingClientRect(); const A = h?.arena || 240, S = Math.min(r.width, r.height) * 0.96, sc = S / A;
-    const x = Math.round((e.clientX - r.left - r.width / 2) / sc), y = Math.round(-(e.clientY - r.top - r.height / 2) / sc);
-    if (Math.abs(x) <= A / 2 && Math.abs(y) <= A / 2) { setPick({ x, y }); setToast(`Food will be placed at (${x}, ${y}). Choose an amount and confirm.`, 4000); }
-  };
   const connect = async () => {
     const ch = chainRef.current; if (!ch) return setToast("Not connected to BNB Chain.");
     try { const a = await ch.connectWallet(); setWallet(a); setBal(fmtTok(await ch.balance()) + " FLY"); setToast(`Connected ${short(a)}`); } catch (e: any) { setToast(e.shortMessage || e.message, 6000); }
   };
-  const placeFood = async () => {
-    const ch = chainRef.current; if (!ch || !wallet) return setToast("Connect a wallet first."); if (!pick) return setToast("Click a spot in the arena first.");
-    const amt = Number(amount) || 0; if (info && ethers.parseEther(String(amt)) < info.minFood) return setToast(`Minimum is ${fmtTok(info.minFood)} $FLY.`);
+  const reload = async (ch: Chain) => { const [rec, evs] = await Promise.all([ch.flyRecord(FLY_ID), ch.registryEvents(40000, FLY_ID)]); setFly(rec); setEvents(evs); setBal(fmtTok(await ch.balance()) + " FLY"); };
+  const feed = async () => {
+    const ch = chainRef.current; if (!ch || !wallet || !reg) return setToast("Connect a wallet first.");
+    const n = Math.floor(Number(amount) || 0); if (n < 1) return setToast("At least one second.");
     setBusy(true);
-    try { setToast("Place food: confirm in your wallet…", 90000); const rc = await ch.placeFood(pick.x, pick.y, ethers.parseEther(String(amt))); setToast(`Food placed in block ${fmt(rc.blockNumber)}. The fly has to find it now.`); setPick(null); setEvents((await ch.worldEvents(40000)).slice(0, 60)); setBal(fmtTok(await ch.balance()) + " FLY"); }
+    try { setToast("Feed: confirm in your wallet (approve $FLY once, then feed)…", 120000); const rc = await ch.feedFly(FLY_ID, n, reg.feed); setToast(`Fed ${fmt(n)} s of life in block ${fmt(rc.blockNumber)}. The arena drops it as food within a minute; the fly has to smell its way there.`, 10000); await reload(ch); }
     catch (e: any) { setToast(`Failed: ${e.shortMessage || e.reason || e.message}`, 8000); } finally { setBusy(false); }
   };
   const resurrect = async () => {
-    const ch = chainRef.current; if (!ch || !wallet) return setToast("Connect a wallet first.");
+    const ch = chainRef.current; if (!ch || !wallet || !reg) return setToast("Connect a wallet first.");
+    const extra = Math.floor(Number(resFood) || 0); if (extra < 60) return setToast("Give it at least 60 seconds of food to live on, or it starves again immediately.");
     setBusy(true);
-    const extra = Number(resFood) || 0; if (extra < 60) return setToast("Give it at least 60 seconds of food to live on, or it starves again immediately.");
-    try { setToast("Resurrect: confirm in your wallet…", 90000); const rc = await ch.resurrectWorld(ethers.parseEther(String(extra)), info.resPrice); setToast(`Resurrected in block ${fmt(rc.blockNumber)}.`); }
+    try { setToast("Resurrect: confirm in your wallet…", 120000); const rc = await ch.resurrectFly(FLY_ID, extra, reg.res, reg.feed); setToast(`Resurrected in block ${fmt(rc.blockNumber)}. The arena picks it up at its next poll.`, 10000); await reload(ch); }
     catch (e: any) { setToast(`Failed: ${e.shortMessage || e.reason || e.message}`, 8000); } finally { setBusy(false); }
   };
 
-  const R = h?.rates || {}; const alive = info ? info.alive : h ? h.alive : true; const streaming = live === "live" && !!h;
-  const chainCheckpoints = events.filter((e) => e.name === "Checkpoint").length;
-  const energyS = h ? h.energy : 0; const hoursLeft = energyS / 3600;
-  const evRow = (e: Ev, i: number) => {
-    const a = e.args; let act = "tick", txt: React.ReactNode = e.name;
-    if (e.name === "FoodPlaced") { act = "feed"; txt = <>placed <b>{fmt(a.seconds_)} s of food</b> at ({String(a.x)}, {String(a.y)}) · {fmtTok(a.tokensBurned)} $FLY</>; }
-    else if (e.name === "Checkpoint") { act = "tick"; txt = <>checkpoint at age {(Number(a.ageMs) / 1000).toFixed(0)} s · brain hash <span className="mono">{String(a.stateHash).slice(0, 14)}…</span> · {fmt(a.spikes)} spikes</>; }
-    else if (e.name === "Died") { act = "life"; txt = <><b>died</b> at age {(Number(a.ageMs) / 1000).toFixed(0)} s · generation {String(a.generation)}</>; }
-    else if (e.name === "Resurrected") { act = "life"; txt = <><b>resurrected</b> · generation {String(a.generation)} · {fmt(a.energy)} s of life</>; }
-    return (<div className="lrow" key={e.tx + i}><a className="blk" href={`${CFG.explorer}/tx/${e.tx}`} target="_blank" rel="noopener">block {e.block}</a><span className={`act ${act}`}>{act}</span><span className="ev">{txt}</span><span className="who">{a.by ? short(a.by) : "operator"}</span></div>);
-  };
+  const R = h?.rates || {}; const alive = fly ? fly.alive : h ? h.alive : true; const streaming = live === "live" && !!h;
+  const st = fly ? status(fly) : null; const hosted = !!fly && fly.body !== ZERO;
+  const chainCheckpoints = events.filter((e) => e.name === "Commit").length;
+  const energyS = h ? h.energy : fly ? fly.energy : 0; const hoursLeft = energyS / 3600;
   const bar = (label: string, v: number, max: number, color: string) => (
     <div className="dnbar" key={label}><span className="lbl">{label}</span><div className="track"><i style={{ width: `${Math.min(100, (100 * v) / max)}%`, background: color }} /></div><span className="mono">{v.toFixed(0)}</span></div>
   );
@@ -148,10 +132,11 @@ export default function LiveFly() {
         <div className="wrap">
           <div>
             <h1>A whole fruit-fly brain, <em>alive and foraging on BNB Chain.</em></h1>
-            <p className="lede">All 139,248 neurons of the FlyWire connectome, running as spiking neurons at real time. Its real olfactory neurons smell food that holders place by burning $FLY. Its real looming detectors see a predator coming, and its giant fiber makes it jump. Its real descending neurons steer. Every ten minutes a hash of the entire brain state is written to BNB Smart Chain. If it does not find food, it starves.</p>
+            <p className="lede">This is Specimen 001, fly #1 of the <Link href="/flies/">Immortal Fruit Flies</Link>. All 139,248 neurons of the FlyWire connectome run as spiking neurons at real time. Its real olfactory neurons smell food that holders give it by burning $FLY; its looming detectors see a predator coming and its giant fiber makes it jump; its descending neurons steer. Every ten minutes the whole brain is snapshotted to IPFS and its hash committed to BNB Smart Chain, so it can die here and wake up in another body, provably the same brain. If it does not find food, it starves.</p>
             <div className="acts">
-              <a className="btn fill" href="#care">Place food</a>
-              <a className="btn" href="#organism">Watch the brain</a>
+              <a className="btn fill" href="#care">Feed it</a>
+              <Link className="btn" href="/flies/">Mint your own · 1 $FLY</Link>
+              <a className="btn plain" href="#organism">Watch the brain</a>
               <a className="btn plain" href="/docs/how-it-works/">How it works →</a>
             </div>
           </div>
@@ -162,14 +147,16 @@ export default function LiveFly() {
               <div className="bar"><i style={{ width: `${Math.min(100, (100 * hoursLeft) / 2)}%` }} /></div>
               <div className="cap"><span>{h ? `${fmt(Math.round(energyS))} s of energy` : ""}</span><span>{h ? `${h.food.length} food item${h.food.length === 1 ? "" : "s"} in the arena` : ""}</span></div>
             </div>
-            <div className="crow"><span>status</span><span><span className={`dot${alive ? "" : " dead"}${streaming ? "" : " sim"}`} style={{ display: "inline-block", marginRight: 7 }} />{alive ? (streaming ? "alive" : "alive · stream offline") : "dead"}</span></div>
-            <div className="crow"><span>generation</span><span>{h ? h.generation : "—"}</span></div>
+            <div className="crow"><span>status</span><span><span className={`dot${alive ? "" : " dead"}${streaming ? "" : " sim"}`} style={{ display: "inline-block", marginRight: 7 }} />{st ? (st.key === "alive" ? (streaming ? `alive · in ${bodyName(fly!.body)}` : `alive · in ${bodyName(fly!.body)} · stream offline`) : st.label) : alive ? "alive" : "dead"}</span></div>
+            <div className="crow"><span>token</span><span><Link href={`/fly/?id=${FLY_ID}`}>fly #{FLY_ID}</Link> · <a href={`${CFG.opensea}/${FLY_ID}`} target="_blank" rel="noopener">OpenSea ↗</a></span></div>
+            <div className="crow"><span>generation · deaths</span><span>{fly ? `${fly.generation} · ${fly.deaths}` : h ? h.generation : "—"}</span></div>
             <div className="crow"><span>age</span><span>{h ? hms(h.t_ms / 1000) : "—"}</span></div>
             <div className="crow"><span>spikes fired</span><span>{h ? fmt(h.spikes_total) : "—"}</span></div>
             <div className="crow"><span>firing now</span><span>{streaming ? `${fmt(spikeRate.current * 10)} / s (rendered subset)` : "—"}</span></div>
             <div className="crow"><span>eaten · jumps · caught</span><span>{h ? `${Math.round(h.ate)} s · ${h.jumps} · ${h.hits}` : "—"}</span></div>
             <div className="crow"><span>speed</span><span>{h ? `${h.realtime}× real time` : "—"}</span></div>
             <div className="crow"><span>checkpoints on-chain</span><span>{events.length ? `${chainCheckpoints} in the last 40k blocks` : "—"}</span></div>
+            <div className="crow"><span>brain state</span><span className="mono" title={fly?.stateRoot}>{fly ? <a href={ipfs(fly.stateURI)} target="_blank" rel="noopener">{fly.stateRoot.slice(0, 14)}… ↗</a> : "—"}</span></div>
           </aside>
         </div>
       </section>
@@ -193,13 +180,13 @@ export default function LiveFly() {
         <div className="wrap">
           <div className="fig-head">
             <div><div className="num">Figure 2</div><h2>The arena</h2></div>
-            <p className="cap"><b>Fig. 2 |</b> <b>a,</b> The world: food (amber) with its odor plume, the fly (red) and its path, and the predator (blue) when one looms. <b>b,</b> The descending neurons that drive its body. Odor-guided turning follows DNa02 and DNa01 left-minus-right (Rayshubskiy et al. 2025); a giant-fiber spike is a jump; walking speed follows the surge-and-cast program of Álvarez-Salvado et al. 2018. Click the arena to choose where to put food.</p>
+            <p className="cap"><b>Fig. 2 |</b> <b>a,</b> The world: food (amber) with its odor plume, the fly (red) and its path, and the predator (blue) when one looms. <b>b,</b> The descending neurons that drive its body. Odor-guided turning follows DNa02 and DNa01 left-minus-right (Rayshubskiy et al. 2025); a giant-fiber spike is a jump; walking speed follows the surge-and-cast program of Álvarez-Salvado et al. 2018.</p>
           </div>
           <div className="grid2">
             <div className="cell">
               <div className="cell-t"><span className="a">a</span><span className="n">World</span><span className="r">{h ? `(${h.x.toFixed(1)}, ${h.y.toFixed(1)}) · ${Math.round((((h.heading * 180) / Math.PI) % 360 + 360) % 360)}°` : ""}</span></div>
-              <div className="cell-b b-arena"><canvas ref={arenaRef} className="walk-c" onClick={arenaClick} aria-label="Top-down view of the arena with food, fly and predator" /></div>
-              <div className="cell-cap"><span><i style={{ "--c": "#f0b429" } as any} />food + plume</span><span><i style={{ "--c": "#ff5a35" } as any} />fly</span><span><i style={{ "--c": "#58c4f5" } as any} />predator</span><span style={{ marginLeft: "auto" }}>{pick ? `chosen: (${pick.x}, ${pick.y})` : "click to choose a food spot"}</span></div>
+              <div className="cell-b b-arena"><canvas ref={arenaRef} className="walk-c" aria-label="Top-down view of the arena with food, fly and predator" /></div>
+              <div className="cell-cap"><span><i style={{ "--c": "#f0b429" } as any} />food + plume</span><span><i style={{ "--c": "#ff5a35" } as any} />fly</span><span><i style={{ "--c": "#58c4f5" } as any} />predator</span><span style={{ marginLeft: "auto" }}>food lands near the fly; it has to smell its way there</span></div>
             </div>
             <div className="cell">
               <div className="cell-t"><span className="a">b</span><span className="n">Descending neurons</span><span className="r">{h ? h.mode : ""}</span></div>
@@ -224,37 +211,36 @@ export default function LiveFly() {
         <div className="wrap">
           <div className="sec-t">
             <div><div className="num">Husbandry</div><h2>It eats what you put in its world.</h2></div>
-            <p>Food is a BNB Chain transaction: burn $FLY, choose a spot, and a plume of odor appears in the arena at the next chain poll. One $FLY buys one second of life, but only if the fly smells its way there before it starves. Everything it has ever been given, and every checkpoint of its brain, is in the record below.</p>
+            <p>Feeding is a BNB Chain transaction on the registry: burn $FLY for seconds of life, and the arena drops that food somewhere near the fly at its next poll. One $FLY buys one second, but only if the fly smells its way there before it starves. Everything it has ever been given, every checkpoint of its brain, every jump and every body it has lived in is in the record below.</p>
           </div>
           <div className="care-grid">
             <div className="care-col">
-              <div className="care-t"><h3>Place food</h3><span className="cost">{info ? `min ${fmtTok(info.minFood)} $FLY · 1 $FLY = 1 s` : "1 $FLY = 1 s"}</span></div>
-              <p>{pick ? `Spot chosen at (${pick.x}, ${pick.y}).` : "Click a spot in Figure 2a."} The plume reaches about 60 body lengths; the fly walks 3 to 4 per second.</p>
-              <div className="field"><input type="number" min={60} value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Amount of FLY" /><button className="btn fill" disabled={busy || !pick} onClick={placeFood}>{busy ? "…" : "Place food"}</button></div>
-              <div className="lbl">= {Number(amount) ? hms(Number(amount)) : "—"} of life if eaten</div>
+              <div className="care-t"><h3>Feed</h3><span className="cost">{reg ? `${fmtTok(reg.feed)} $FLY = 1 s` : "1 $FLY = 1 s"}</span></div>
+              <p>Food lands 40 to 110 body lengths from the fly. Its plume reaches about 60; the fly walks 3 to 4 per second. Anyone may feed it.</p>
+              <div className="field"><input type="number" min={1} value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Seconds of life" /><button className="btn fill" disabled={busy || !alive} onClick={wallet ? feed : connect}>{busy ? "…" : wallet ? "Feed" : "Connect wallet"}</button></div>
+              <div className="lbl">= {Number(amount) ? hms(Number(amount)) : "—"} of life if eaten{wallet ? ` · ${short(wallet)} · ${bal}` : ""}</div>
             </div>
             <div className="care-col">
-              <div className="care-t"><h3>{alive ? "Your wallet" : "Resurrect"}</h3><span className="cost">{alive ? (info ? `gen ${info.generation}` : "") : info ? `${fmtTok(info.resPrice)} $FLY + food` : ""}</span></div>
+              <div className="care-t"><h3>{alive ? "The organism" : "Resurrect"}</h3><span className="cost">{alive ? (fly ? `gen ${fly.generation} · ${fly.deaths} deaths` : "") : reg ? `${fmtTok(reg.res)} $FLY + food` : ""}</span></div>
               {alive ? (<>
-                <p>Every placement is stored against the address that paid for it. The arena contract has no owner functions beyond the operator&apos;s checkpoints.</p>
-                {wallet ? <div className="field"><span className="btn sm" style={{ flex: 1, justifyContent: "space-between", cursor: "default" }}><span className="mono">{short(wallet)}</span><span className="mono dim">{bal}</span></span></div> : <button className="btn" onClick={connect}>Connect wallet</button>}
-                <a className="btn sm plain" href={`${CFG.explorer}/address/${CFG.world}`} target="_blank" rel="noopener">FlyWorld on BscScan →</a>
+                <p>Fly #1 is a token in the <Link href="/flies/">Immortal Fruit Flies</Link>. Its brain, memory, lineage and history live on the registry, not in this arena; {hosted ? `${bodyName(fly!.body)} is only the body running it right now` : "no body is running it right now"}. Every feed is stored against the address that paid.</p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><Link className="btn sm" href={`/fly/?id=${FLY_ID}`}>Fly #1’s record</Link><a className="btn sm" href={`${CFG.opensea}/${FLY_ID}`} target="_blank" rel="noopener">OpenSea ↗</a><Link className="btn sm plain" href="/flies/">Mint your own →</Link></div>
               </>) : (<>
-                <p>Energy reached zero. The brain was frozen and its hash written on-chain. Burn $FLY to wake the same brain in a new body.</p>
-                <div className="field"><input type="number" min={60} value={resFood} onChange={(e) => setResFood(e.target.value)} aria-label="Seconds of food to wake up with" /><button className="btn fill" disabled={busy} onClick={resurrect}>Resurrect</button></div>
+                <p>Energy reached zero. The brain was frozen at that instant and its hash written on-chain. Burn $FLY to continue the same brain, as generation {fly ? fly.generation + 1 : ""}. Until then the token cannot be sold.</p>
+                <div className="field"><input type="number" min={60} value={resFood} onChange={(e) => setResFood(e.target.value)} aria-label="Seconds of food to wake up with" /><button className="btn fill" disabled={busy} onClick={wallet ? resurrect : connect}>{wallet ? "Resurrect" : "Connect wallet"}</button></div>
                 <div className="lbl">= {Number(resFood) ? hms(Number(resFood)) : "—"} of life on waking · minimum 60 s</div>
               </>)}
             </div>
             <div className="care-col">
               <div className="care-t"><h3>Verify it</h3><span className="cost">{h?.chain?.last_hash ? h.chain.last_hash.slice(0, 10) + "…" : ""}</span></div>
-              <p>Each checkpoint names a snapshot: every membrane potential, synaptic current and refractory clock, the full world state, and the step at which each on-chain event was applied. <code>brain/verify.py</code> replays one snapshot into the next and checks the hash. Snapshots are served while the operator&apos;s server is up.</p>
-              <a className="btn sm" href={`${origin}/snapshots/`} target="_blank" rel="noopener">Snapshots ↗</a>
+              <p>Each checkpoint pins a snapshot to IPFS: every membrane potential, synaptic current and refractory clock, the full world state, and the step at which each on-chain event was applied. Its sha256 is the <code>stateRoot</code> on the registry, so any body, or anyone, can fetch it, check it, and run this exact brain. <code>brain/verify.py</code> replays one snapshot into the next and checks the hash.</p>
+              {fly?.stateURI && <a className="btn sm" href={ipfs(fly.stateURI)} target="_blank" rel="noopener">Latest snapshot on IPFS ↗</a>}
               <a className="btn sm plain" href={CFG.links.github + "/tree/main/brain"} target="_blank" rel="noopener">Simulator source →</a>
             </div>
           </div>
           <div style={{ marginTop: 40 }}>
-            <div className="log-head"><b style={{ fontSize: 13 }}>Record</b><span className="lbl">food, checkpoints, deaths, resurrections · newest first</span></div>
-            <div className="log-list">{events.length ? events.map(evRow) : <div className="lrow"><span className="blk">—</span><span className="act" /><span className="ev">reading BNB Smart Chain…</span><span /></div>}</div>
+            <div className="log-head"><b style={{ fontSize: 13 }}>Record</b><span className="lbl">feeds, checkpoints, jumps, bodies, deaths · newest first · <Link href={`/fly/?id=${FLY_ID}`}>full history →</Link></span></div>
+            <RecordList events={events} max={60} />
           </div>
           {h?.events?.length > 0 && (<div style={{ marginTop: 28 }}>
             <div className="log-head"><b style={{ fontSize: 13 }}>Diary</b><span className="lbl">what happened to it in the arena</span></div>

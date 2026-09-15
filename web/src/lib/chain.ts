@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { ethers } from "ethers";
 import { CFG } from "./config";
+import REGISTRY_ABI from "@/data/registry.abi.json";
 
 export const BRAIN_ABI = [
   "function brainState() view returns (int16[] v,int8[] bias,uint16[16] headingHist,int32[] pendingInput,uint64 step,uint64 energy,bool alive,uint32 generation,int64 posX,int64 posY,int32 headX,int32 headY)",
@@ -39,7 +40,7 @@ export const TOKEN_ABI = [
 const GAS = { tick16: 4_500_000, tick32: 9_000_000, stim16: 9_000_000, stim32: 15_500_000 };
 
 export class Chain {
-  provider: any = null; brain: any = null; token: any = null; world: any = null; worldW: any; signer: any = null; account: string | null = null; brainW: any; tokenW: any; prices: any;
+  provider: any = null; brain: any = null; token: any = null; world: any = null; worldW: any; registry: any = null; registryW: any; signer: any = null; account: string | null = null; brainW: any; tokenW: any; prices: any;
   async connectRead() {
     let lastErr;
     for (const url of CFG.rpc) {
@@ -53,6 +54,7 @@ export class Chain {
     this.brain = new ethers.Contract(CFG.brain, BRAIN_ABI, this.provider);
     this.token = new ethers.Contract(CFG.token, TOKEN_ABI, this.provider);
     this.world = new ethers.Contract(CFG.world, WORLD_ABI, this.provider);
+    this.registry = new ethers.Contract(CFG.registry, REGISTRY_ABI as any, this.provider);
     const [tps, sp, rp, ttl, maxSteps] = await Promise.all([this.brain.TOKENS_PER_STEP(), this.brain.STIM_PRICE(), this.brain.RESURRECT_PRICE(), this.brain.STIM_TTL(), this.brain.MAX_STEPS()]);
     this.prices = { tokensPerStep: tps, stimPrice: sp, resurrectPrice: rp, stimTTL: Number(ttl), maxSteps: Number(maxSteps) };
     return this;
@@ -106,6 +108,34 @@ export class Chain {
   async resurrectWorld(extra: bigint, resPrice: bigint) { await this._ensureAllowanceFor(CFG.world, resPrice + extra); return (await this.worldW.resurrect(extra)).wait(); }
   async _ensureAllowanceFor(spender: string, value: bigint) { if ((await this.token.allowance(this.account, spender)) < value) await (await this.tokenW.approve(spender, ethers.MaxUint256)).wait(); }
 
+  // ---- FlyRegistry
+  async registryInfo() {
+    const [total, max, mint, res, feed, breed, gen, burned] = await Promise.all([this.registry.totalMinted(), this.registry.MAX_SUPPLY(), this.registry.MINT_PRICE(), this.registry.RESURRECT_PRICE(), this.registry.FEED_PER_SECOND(), this.registry.BREED_PRICE(), this.registry.GENESIS_ENERGY(), this.registry.totalBurned()]);
+    return { total: Number(total), max: Number(max), mint, res, feed, breed, genesisEnergy: Number(gen), burned };
+  }
+  async flyRecord(id: number) {
+    const [f, name, owner, uri] = await Promise.all([this.registry.fly(id), this.registry.flyName(id), this.registry.ownerOf(id), this.registry.tokenURI(id)]);
+    return { id, name, owner, uri, connectome: f.connectome, model: Number(f.model), generation: Number(f.generation), deaths: Number(f.deaths), parentA: Number(f.parentA), parentB: Number(f.parentB), stateRoot: f.stateRoot, memoryRoot: f.memoryRoot, stateURI: f.stateURI, brainStep: Number(f.brainStep), energy: Number(f.energy), bornBlock: Number(f.bornBlock), lastCommitBlock: Number(f.lastCommitBlock), body: f.body, pendingBody: f.pendingBody, alive: f.alive };
+  }
+  async bodyInfo(addr: string) { const b = await this.registry.bodies(addr); return { name: b.name, uri: b.uri, flies: Number(b.flies) }; }
+  async registryEvents(blocks = 40000, flyId?: number) {
+    const to = await this.provider.getBlockNumber(); const from = Math.max(CFG.registryDeployBlock, to - blocks);
+    const raw: any[] = [];
+    for (let b = to; b > from; b -= 2000) { try { raw.push(...(await this.provider.getLogs({ address: CFG.registry, fromBlock: Math.max(from, b - 1999), toBlock: b }))); } catch (e) { console.warn("registry logs chunk failed", e); } }
+    raw.sort((x, y) => x.blockNumber - y.blockNumber || x.index - y.index);
+    const out = [];
+    for (const l of raw) { try { const p = this.registry.interface.parseLog({ topics: l.topics, data: l.data }); if (p && (flyId === undefined || (p.args.id !== undefined && Number(p.args.id) === flyId) || (p.args._tokenId !== undefined && Number(p.args._tokenId) === flyId))) out.push({ name: p.name, args: p.args, block: l.blockNumber, tx: l.transactionHash }); } catch {} }
+    return out.reverse();
+  }
+  async metadataOf(uri: string) { const u = uri.startsWith("ipfs://") ? CFG.ipfsGateway + uri.slice(7) : uri; try { return await (await fetch(u)).json(); } catch { return null; } }
+  ipfsHttp(uri: string) { return uri && uri.startsWith("ipfs://") ? CFG.ipfsGateway + uri.slice(7) : uri; }
+  async mintFly(name: string, price: bigint) { await this._ensureAllowanceFor(CFG.registry, price); return (await this.registryW.mint(name, { gasLimit: 400000 })).wait(); }
+  async feedFly(id: number, seconds: number, perSecond: bigint) { await this._ensureAllowanceFor(CFG.registry, BigInt(seconds) * perSecond); return (await this.registryW.feed(id, seconds)).wait(); }
+  async resurrectFly(id: number, seconds: number, res: bigint, perSecond: bigint) { await this._ensureAllowanceFor(CFG.registry, res + BigInt(seconds) * perSecond); return (await this.registryW.resurrect(id, seconds)).wait(); }
+  async assignFly(id: number, body: string) { return (await this.registryW.assign(id, body)).wait(); }
+  async breedFlies(a: number, b: number, name: string, price: bigint) { await this._ensureAllowanceFor(CFG.registry, price); return (await this.registryW.breed(a, b, ethers.ZeroHash, name, { gasLimit: 500000 })).wait(); }
+  async ownedFlies(owner: string, total: number) { const out: number[] = []; for (let i = 1; i <= total; i++) { try { if ((await this.registry.ownerOf(i)).toLowerCase() === owner.toLowerCase()) out.push(i); } catch {} } return out; }
+
   async recentEvents(blocks = 20000) {
     const to = await this.provider.getBlockNumber(); const from = Math.max(0, to - blocks);
     const raw: any[] = [];
@@ -127,7 +157,7 @@ export class Chain {
       else throw e;
     }
     this.signer = await bp.getSigner(); this.account = await this.signer.getAddress();
-    this.brainW = this.brain.connect(this.signer); this.tokenW = this.token.connect(this.signer); this.worldW = this.world.connect(this.signer);
+    this.brainW = this.brain.connect(this.signer); this.tokenW = this.token.connect(this.signer); this.worldW = this.world.connect(this.signer); this.registryW = this.registry.connect(this.signer);
     return this.account;
   }
   async balance() { return this.account ? this.token.balanceOf(this.account) : 0n; }

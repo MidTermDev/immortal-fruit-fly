@@ -45,3 +45,6 @@ brain/doom_test/
 brain/doom*.log
 keeper/keeper.key
 scape/
+brain/pinata.env
+brain/body_*.key
+web/.next.pid
