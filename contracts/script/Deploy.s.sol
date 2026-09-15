@@ -39,7 +39,8 @@ contract Deploy is Script {
             stimGain: uint16(vm.parseJsonUint(pj, ".stimGain")),
             stimTTL: uint16(vm.parseJsonUint(pj, ".stimTTL")),
             walkThreshold: uint16(vm.parseJsonUint(pj, ".walkThreshold")),
-            maxSteps: uint8(vm.parseJsonUint(pj, ".maxSteps"))
+            maxSteps: uint8(vm.parseJsonUint(pj, ".maxSteps")),
+            persistInput: vm.keyExistsJson(pj, ".persistInput") && vm.parseJsonBool(pj, ".persistInput")
         });
         string memory mj = vm.readFile("data/circuit_meta.json");
         bytes32 datasetSha = vm.parseBytes32(string.concat("0x", vm.parseJsonString(mj, ".connections_file_sha256")));

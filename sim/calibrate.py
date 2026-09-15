@@ -39,8 +39,9 @@ def cos(a, b):
     return sum(x * y for x, y in zip(a, b)) / (na * nb) if na > 0 and nb > 0 else 0.0
 
 
-def run_protocol(p, want_trace=False):
+def run_protocol(p, want_trace=False, idle=0, cue=4):
     b = FlyBrain(CIRC, p, energy=10**9)
+    if idle: b.tick(32) if idle == 32 else [b.tick(32) for _ in range(idle // 32)]
     wins = {}
     trace = []
 
@@ -54,7 +55,7 @@ def run_protocol(p, want_trace=False):
             if want_trace: trace.append((tag, list(b.last_spk)))
         wins[tag] = ([spk[i] for i in EPG], tot / steps, steps)
 
-    run('A', 64, CH_CUE, 4, 4)
+    run('A', 64, CH_CUE, cue, 4)
     run('B1', 32); run('B2', 32); run('B3', 32); run('B4', 32)
     run('C1', 32, CH_TURN_LEFT, 0, 4); run('C2', 32)
     run('D', 64)
@@ -67,6 +68,7 @@ def run_protocol(p, want_trace=False):
         return sum(c[:TOPK]) / t if t > 0 else 0.0
     m = {}
     m['rateA'] = rate('A'); m['concA'] = conc('A')
+    aA, rA, _ = popvec(wins['A'][0]); m['cueErr'] = abs(math.degrees(dang((cue + 0.5) * 2 * math.pi / 16, aA))); m['RA'] = rA
     m['rateB'] = sum(rate(k) for k in ('B1', 'B2', 'B3', 'B4')) / 4
     m['concB'] = sum(conc(k) for k in ('B1', 'B2', 'B3', 'B4')) / 4
     m['simB'] = cos(wins['B1'][0], wins['B4'][0])
@@ -87,6 +89,7 @@ def run_protocol(p, want_trace=False):
 
     alive = 1.0 if m['rateB'] >= 1.0 else 0.0
     score = 0.0
+    score += 1.5 * (1 if m['cueErr'] < 25 else max(0.0, 1 - (m['cueErr'] - 25) / 45)) * atleast(m['RA'], 0.5)
     score += 2 * inrange(m['rateB'], 1.0, 10.0)
     score += 2 * atleast(m['concB'], 0.75) * alive
     score += 2 * atleast(m['RB'], 0.6) * alive
@@ -109,7 +112,7 @@ def sample(rng):
                 thresh=1000, reset=int(rng.choice([-200, -500, -1000, -1500])), vMin=-4000,
                 gains=[logu(rng, 8, 250), logu(rng, 8, 250), logu(rng, 4, 250), logu(rng, 8, 250), logu(rng, 8, 250), -logu(rng, 8, 400)],
                 gBias=4, noise=int(rng.choice([20, 40, 70, 100, 140])),
-                stimGain=int(rng.choice([40, 70, 100, 150])), stimTTL=64, walkThreshold=100, maxSteps=64)
+                stimGain=int(rng.choice([40, 70, 100, 150])), stimTTL=64, walkThreshold=100, maxSteps=64, persistInput=True)
 
 
 def mutate(p, rng, scale=0.3):
@@ -122,9 +125,16 @@ def mutate(p, rng, scale=0.3):
     return q
 
 
+VARIANTS = [(0, 4), (64, 11), (160, 4), (32, 7)]
+
+
 def evaluate(p):
     try:
-        return p, run_protocol(p)
+        ms = [run_protocol(p, idle=i, cue=c) for i, c in VARIANTS]
+        m = {k: sum(x[k] for x in ms) / len(ms) for k in ms[0]}
+        m['minScore'] = min(x['score'] for x in ms)
+        m['score'] = 0.6 * m['score'] + 0.4 * m['minScore']
+        return p, m
     except Exception as e:  # noqa
         return p, {'score': -99, 'err': str(e)}
 

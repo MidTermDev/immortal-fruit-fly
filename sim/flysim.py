@@ -101,7 +101,7 @@ class FlyBrain:
         N = c.N
         stimActive = self.stimChannel != CH_NONE and self.step < self.stimUntil
         stimI = self._build_stim() if stimActive else [0] * N
-        self.inp = [0] * N  # as on-chain: synaptic input is transient memory, cleared at each tick
+        if not p.get('persistInput'): self.inp = [0] * N  # v1 contracts drop pending input at each tick; v2 keeps it in storage
         spk = [0] * N; bins = [0] * WEDGES; hx = hy = 0; tickSpikes = 0
         s0 = self.step; ran = 0
         while ran < steps and self.energy > 0:

@@ -46,7 +46,7 @@
     loadState(s) {
       // s: { v:int16[], bias:int8[], hist:uint16[16], step, energy, alive, generation, posX, posY, headX, headY, stim:{channel,param,strength,untilStep} }
       this.v = s.v.map(Number); this.bias = s.bias.map(Number); this.hist = s.hist.map(Number);
-      this.inp.fill(0);
+      this.inp = s.pendingInput ? s.pendingInput.map(Number) : new Array(this.c.N).fill(0);
       this.step = Number(s.step); this.energy = Number(s.energy); this.alive = !!s.alive; this.generation = Number(s.generation);
       this.posX = Number(s.posX); this.posY = Number(s.posY); this.headX = Number(s.headX); this.headY = Number(s.headY);
       if (s.stim) { this.stimChannel = Number(s.stim.channel); this.stimParam = Number(s.stim.param); this.stimStrength = Number(s.stim.strength); this.stimUntil = Number(s.stim.untilStep); }
@@ -76,7 +76,7 @@
       if (!this.alive) return null;
       const stimActive = this.stimChannel !== 0 && this.step < this.stimUntil;
       const stimI = stimActive ? this.buildStim() : null;
-      this.inp.fill(0); // as on-chain: synaptic input is transient, cleared at each tick
+      if (!p.persistInput) this.inp.fill(0); // v1 contracts drop pending input at each tick; v2 keeps it in storage
       const spk = new Array(N).fill(0), bins = new Array(WEDGES).fill(0);
       let hx = 0, hy = 0, tickSpikes = 0, ran = 0;
       const s0 = this.step;

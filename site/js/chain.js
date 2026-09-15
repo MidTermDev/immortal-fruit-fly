@@ -1,7 +1,7 @@
 // On-chain layer: read the fly from BNB Smart Chain, and act on it with a wallet.
 (function (global) {
   const BRAIN_ABI = [
-    'function brainState() view returns (int16[] v,int8[] bias,uint16[16] headingHist,uint64 step,uint64 energy,bool alive,uint32 generation,int64 posX,int64 posY,int32 headX,int32 headY)',
+    'function brainState() view returns (int16[] v,int8[] bias,uint16[16] headingHist,int32[] pendingInput,uint64 step,uint64 energy,bool alive,uint32 generation,int64 posX,int64 posY,int32 headX,int32 headY)',
     'function activeStimulus() view returns (uint8 channel,uint8 param,uint16 strength,uint64 untilStep,bool active)',
     'function totalSpikes() view returns (uint64)',
     'function totalBurned() view returns (uint256)',
@@ -64,7 +64,7 @@
         this.brain.brainState(), this.brain.activeStimulus(), this.brain.totalSpikes(), this.brain.totalBurned(), this.brain.lineageLength(), this.token.totalSupply(), this.provider.getBlockNumber(),
       ]);
       return {
-        v: Array.from(s.v, Number), bias: Array.from(s.bias, Number), hist: Array.from(s.headingHist, Number),
+        v: Array.from(s.v, Number), bias: Array.from(s.bias, Number), hist: Array.from(s.headingHist, Number), pendingInput: Array.from(s.pendingInput, Number),
         step: Number(s.step), energy: Number(s.energy), alive: s.alive, generation: Number(s.generation),
         posX: Number(s.posX), posY: Number(s.posY), headX: Number(s.headX), headY: Number(s.headY),
         stim: { channel: Number(st.channel), param: Number(st.param), strength: Number(st.strength), untilStep: Number(st.untilStep), active: st.active },

@@ -78,6 +78,7 @@ contract FlyBrain {
         uint16 stimTTL; // steps a stimulus stays active
         uint16 walkThreshold; // min |heading vector| per step to walk
         uint8 maxSteps; // max steps per tick
+        bool persistInput; // keep pending synaptic input in storage between ticks (v2) instead of dropping it (v1)
     }
 
     // ------------------------------------------------------------ immutables
@@ -110,12 +111,16 @@ contract FlyBrain {
     uint16 public immutable STIM_TTL;
     uint16 public immutable WALK_THRESHOLD;
     uint8 public immutable MAX_STEPS;
+    bool public immutable PERSIST_INPUT;
 
     uint256 public immutable TOKENS_PER_STEP; // feed price: 1 step of life per this many token-wei
     uint256 public immutable STIM_PRICE; // token-wei per unit of stimulus strength
     uint256 public immutable RESURRECT_PRICE; // token-wei to resurrect
 
     int8 public constant BIAS_MAX = 24;
+    // cos/sin of wedge centres, int8 x127, one byte per wedge (see _cos16/_sin16)
+    uint256 private constant COS_T = 0x7d6a4719e7b996838396b9e719476a7d00000000000000000000000000000000;
+    uint256 private constant SIN_T = 0x19476a7d7d6a4719e7b996838396b9e700000000000000000000000000000000;
     int64 public constant STRIDE = 16; // 1/256 cells per step at full bump strength
 
     string public datasetName;
@@ -124,6 +129,8 @@ contract FlyBrain {
 
     // Membrane potentials: 16 x int16 lanes per word.
     uint256[16] private _v;
+    // Pending synaptic input: 8 x int32 lanes per word (only used when PERSIST_INPUT).
+    uint256[32] private _inp;
     // Engram: 32 x int8 lanes per word. Slow Hebbian potentiation of habitually active neurons.
     uint256[8] private _bias;
     // Heading histogram: 16 x uint16 lanes. How often the compass bump sat in each wedge.
@@ -257,6 +264,7 @@ contract FlyBrain {
         STIM_TTL = p.stimTTL;
         WALK_THRESHOLD = p.walkThreshold;
         MAX_STEPS = p.maxSteps;
+        PERSIST_INPUT = p.persistInput;
         if (p.maxSteps == 0) revert BadSteps();
 
         TOKENS_PER_STEP = tokensPerStep;
@@ -425,6 +433,7 @@ contract FlyBrain {
         s.stimI = new int32[](n);
         _loadV(s.v);
         _loadBias(s.bias);
+        if (PERSIST_INPUT) _loadInp(s.inp);
 
         bool stimActive = stimChannel != CH_NONE && step < stimUntilStep;
         if (stimActive) _buildStim(s.d, s.stimI);
@@ -446,6 +455,7 @@ contract FlyBrain {
 
         _storeV(s.v);
         _storeBias(s.bias);
+        if (PERSIST_INPUT) _storeInp(s.inp);
         step = s0 + s.ran;
         energy = en;
         totalSpikes += s.spikes;
@@ -460,51 +470,101 @@ contract FlyBrain {
     }
 
     /// One synchronous LIF step. Spikes fired at step t arrive at their targets at t+1.
+    /// Written in assembly for gas; the arithmetic is identical to sim/flysim.py.
     function _step(Sim memory s, uint64 sn, bool stimNow) private view {
         bytes memory d = s.d;
-        uint256 n = s.v.length;
-        uint256 rnd = uint256(keccak256(abi.encodePacked(sn)));
-        uint256 nSpk = 0;
+        int32[] memory v = s.v;
+        int32[] memory bias = s.bias;
+        int32[] memory inp = s.inp;
+        uint32[] memory spk = s.spk;
+        uint256[] memory spikeList = s.spikeList;
+        int32[] memory stimI = s.stimI;
+        uint32[16] memory bins = s.bins;
+        uint256 n = N;
+        uint256 offType = _offType;
+        uint256 offWedge = _offWedge;
+        uint256 offOffsets = _offOffsets;
+        uint256 offSyn = _offSyn;
+        int256 leak = int256(uint256(LEAK));
+        int256 thresh = THRESH;
+        int256 reset = RESET;
+        int256 vMin = V_MIN;
+        int256 gBias = int256(uint256(G_BIAS));
+        int256 noise = int256(uint256(NOISE));
+        uint256 gains = GAINS;
+        uint256 cosT = COS_T;
+        uint256 sinT = SIN_T;
+        int256 hx = s.hx;
+        int256 hy = s.hy;
+        uint256 nSpk;
 
-        unchecked {
+        assembly ("memory-safe") {
+            let dp := add(d, 32)
+            let vp := add(v, 32)
+            let bp := add(bias, 32)
+            let ip := add(inp, 32)
+            let kp := add(spk, 32)
+            let lp := add(spikeList, 32)
+            let sp := add(stimI, 32)
+
+            // noise seed = keccak256(abi.encodePacked(uint64 sn))
+            mstore(0, shl(192, sn))
+            let rnd := keccak256(0, 8)
+
             // pass 1: leak, integrate, threshold
-            for (uint256 i = 0; i < n; ++i) {
-                if ((i & 31) == 0 && i != 0) rnd = uint256(keccak256(abi.encodePacked(rnd)));
-                int32 nz = int32(int256(uint256((rnd >> ((i & 31) * 8)) & 0xFF))) - 128;
-                int32 x = s.v[i];
-                x -= (x * int32(uint32(LEAK))) / 1024;
-                x += s.inp[i] + (nz * int32(uint32(NOISE))) / 128 + s.bias[i] * int32(uint32(G_BIAS));
-                if (stimNow) x += s.stimI[i];
-                s.inp[i] = 0;
-                if (x < int32(V_MIN)) x = int32(V_MIN);
-                if (x >= int32(THRESH)) {
-                    x = int32(RESET);
-                    s.spikeList[nSpk++] = i;
-                    s.spk[i] += 1;
-                    if (_u8(d, _offType + i) <= T_EPGT) {
-                        uint256 wedge = _u8(d, _offWedge + i);
-                        if (wedge != NO_WEDGE) {
-                            s.hx += _cos16(wedge);
-                            s.hy += _sin16(wedge);
-                            s.bins[wedge] += 1;
+            for { let i := 0 } lt(i, n) { i := add(i, 1) } {
+                if and(iszero(and(i, 31)), gt(i, 0)) {
+                    mstore(0, rnd)
+                    rnd := keccak256(0, 32)
+                }
+                let nz := sub(and(shr(mul(and(i, 31), 8), rnd), 0xFF), 128)
+                let off := shl(5, i)
+                let x := mload(add(vp, off))
+                x := sub(x, sdiv(mul(x, leak), 1024))
+                x := add(x, mload(add(ip, off)))
+                x := add(x, sdiv(mul(nz, noise), 128))
+                x := add(x, mul(mload(add(bp, off)), gBias))
+                if stimNow { x := add(x, mload(add(sp, off))) }
+                mstore(add(ip, off), 0)
+                if slt(x, vMin) { x := vMin }
+                if iszero(slt(x, thresh)) {
+                    x := reset
+                    mstore(add(lp, shl(5, nSpk)), i)
+                    nSpk := add(nSpk, 1)
+                    let sk := add(kp, off)
+                    mstore(sk, add(mload(sk), 1))
+                    if lt(byte(0, mload(add(dp, add(offType, i)))), 2) {
+                        let wedge := byte(0, mload(add(dp, add(offWedge, i))))
+                        if lt(wedge, 16) {
+                            hx := add(hx, signextend(0, byte(wedge, cosT)))
+                            hy := add(hy, signextend(0, byte(wedge, sinT)))
+                            let bk := add(bins, shl(5, wedge))
+                            mstore(bk, add(mload(bk), 1))
                         }
                     }
                 }
-                s.v[i] = x;
+                mstore(add(vp, off), x)
             }
-            s.spikes += uint32(nSpk);
 
             // pass 2: propagate spikes into next step's input
-            for (uint256 k = 0; k < nSpk; ++k) {
-                uint256 i = s.spikeList[k];
-                int32 g = int32(int16(uint16(GAINS >> (_u8(d, _offType + i) * 16))));
-                uint256 a = _offSyn + 2 * _u16(d, _offOffsets + 2 * i);
-                uint256 b = _offSyn + 2 * _u16(d, _offOffsets + 2 * i + 2);
-                for (uint256 q = a; q < b; q += 2) {
-                    s.inp[_u8(d, q)] += (int32(int256(_u8(d, q + 1))) * g) / 16;
+            let synBase := add(dp, offSyn)
+            for { let k := 0 } lt(k, nSpk) { k := add(k, 1) } {
+                let i := mload(add(lp, shl(5, k)))
+                let t := byte(0, mload(add(dp, add(offType, i))))
+                let g := signextend(1, shr(mul(t, 16), gains))
+                let oi := add(dp, add(offOffsets, shl(1, i)))
+                let a := add(synBase, shl(1, shr(240, mload(oi))))
+                let b := add(synBase, shl(1, shr(240, mload(add(oi, 2)))))
+                for { let q := a } lt(q, b) { q := add(q, 2) } {
+                    let word := mload(q)
+                    let slot := add(ip, shl(5, byte(0, word)))
+                    mstore(slot, add(mload(slot), sdiv(mul(byte(1, word), g), 16)))
                 }
             }
         }
+        s.hx = int64(hx);
+        s.hy = int64(hy);
+        s.spikes += uint32(nSpk);
     }
 
     /// Engram: neurons that fired in at least 1/8 of this tick's steps potentiate by 1,
@@ -601,6 +661,27 @@ contract FlyBrain {
         }
     }
 
+    function _loadInp(int32[] memory a) private view {
+        uint256 n = a.length;
+        for (uint256 i = 0; i < n; i += 8) {
+            uint256 word = _inp[i / 8];
+            for (uint256 k = 0; k < 8 && i + k < n; ++k) {
+                a[i + k] = int32(uint32(word >> (k * 32)));
+            }
+        }
+    }
+
+    function _storeInp(int32[] memory a) private {
+        uint256 n = a.length;
+        for (uint256 i = 0; i < n; i += 8) {
+            uint256 word = 0;
+            for (uint256 k = 0; k < 8 && i + k < n; ++k) {
+                word |= uint256(uint32(a[i + k])) << (k * 32);
+            }
+            _inp[i / 8] = word;
+        }
+    }
+
     function _loadBias(int32[] memory b) private view {
         uint256 n = b.length;
         for (uint256 i = 0; i < n; i += 32) {
@@ -641,6 +722,7 @@ contract FlyBrain {
             int16[] memory v,
             int8[] memory bias,
             uint16[16] memory headingHist,
+            int32[] memory pendingInput,
             uint64 step_,
             uint64 energy_,
             bool alive_,
@@ -654,14 +736,16 @@ contract FlyBrain {
         uint256 n = N;
         v = new int16[](n);
         bias = new int8[](n);
+        pendingInput = new int32[](n);
         for (uint256 i = 0; i < n; ++i) {
             v[i] = int16(uint16(_v[i / 16] >> ((i % 16) * 16)));
             bias[i] = int8(uint8(_bias[i / 32] >> ((i % 32) * 8)));
+            pendingInput[i] = int32(uint32(_inp[i / 8] >> ((i % 8) * 32)));
         }
         for (uint256 w = 0; w < 16; ++w) {
             headingHist[w] = uint16(_headingHist >> (w * 16));
         }
-        return (v, bias, headingHist, step, energy, alive, generation, posX, posY, headX, headY);
+        return (v, bias, headingHist, pendingInput, step, energy, alive, generation, posX, posY, headX, headY);
     }
 
     function activeStimulus() external view returns (uint8 channel, uint8 param, uint16 strength, uint64 untilStep, bool active) {
@@ -671,7 +755,7 @@ contract FlyBrain {
 
     /// @notice keccak256 of the complete brain state — what gets recorded in `lineage` at death.
     function brainStateHash() public view returns (bytes32) {
-        return keccak256(abi.encodePacked(_v, _bias, _headingHist, step, generation));
+        return keccak256(abi.encodePacked(_v, _bias, _inp, _headingHist, step, generation));
     }
 
     /// @notice Synaptic gain applied to spikes from neurons of cell type `t`.

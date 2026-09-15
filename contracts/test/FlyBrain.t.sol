@@ -37,7 +37,8 @@ contract FlyBrainTest is Test {
             stimGain: uint16(vm.parseJsonUint(pj, ".stimGain")),
             stimTTL: uint16(vm.parseJsonUint(pj, ".stimTTL")),
             walkThreshold: uint16(vm.parseJsonUint(pj, ".walkThreshold")),
-            maxSteps: uint8(vm.parseJsonUint(pj, ".maxSteps"))
+            maxSteps: uint8(vm.parseJsonUint(pj, ".maxSteps")),
+            persistInput: vm.keyExistsJson(pj, ".persistInput") && vm.parseJsonBool(pj, ".persistInput")
         });
     }
 
@@ -108,7 +109,7 @@ contract FlyBrainTest is Test {
         assertEq(brain.step(), 32);
         assertEq(brain.energy(), GENESIS - 32);
         assertGt(brain.totalSpikes(), 0);
-        (,,,,,,,,,, int32 hy) = brain.brainState();
+        (,,,,,,,,,,, int32 hy) = brain.brainState();
         hy; // heading is whatever the circuit does; just exercise the view
         (, uint64 ticks,) = brain.caretakers(alice);
         assertEq(ticks, 1);
@@ -258,7 +259,7 @@ contract FlyBrainTest is Test {
         brain.stimulate(CUE, 2, 4, 64);
         uint16 maxSteps = brain.MAX_STEPS();
         while (brain.alive()) brain.tick(maxSteps);
-        (int16[] memory vDead, int8[] memory biasDead, uint16[16] memory histDead,,,,,,,,) = brain.brainState();
+        (int16[] memory vDead, int8[] memory biasDead, uint16[16] memory histDead,,,,,,,,,) = brain.brainState();
         int64 px = brain.posX();
         int64 py = brain.posY();
         assertTrue(px != 0 || py != 0, "should have walked");
@@ -276,7 +277,7 @@ contract FlyBrainTest is Test {
         assertEq(brain.bornBlock(), uint64(block.number));
         assertEq(brain.lifeSteps(), 0);
 
-        (int16[] memory v2, int8[] memory bias2, uint16[16] memory hist2,,,,,,,,) = brain.brainState();
+        (int16[] memory v2, int8[] memory bias2, uint16[16] memory hist2,,,,,,,,,) = brain.brainState();
         for (uint256 i = 0; i < v2.length; ++i) {
             assertEq(v2[i], vDead[i], "membrane potential preserved");
             assertEq(bias2[i], biasDead[i], "engram preserved");
