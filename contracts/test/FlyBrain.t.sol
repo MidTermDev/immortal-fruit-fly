@@ -163,11 +163,12 @@ contract FlyBrainTest is Test {
     // --------------------------------------------------------- feed / burn
 
     function test_feedBurns() public {
-        uint256 supplyBefore = token.totalSupply();
+        uint256 deadBefore = token.balanceOf(brain.DEAD());
         vm.prank(alice);
         brain.feed(500 ether);
         assertEq(brain.energy(), GENESIS + 500);
-        assertEq(token.totalSupply(), supplyBefore - 500 ether);
+        assertEq(token.balanceOf(brain.DEAD()), deadBefore + 500 ether);
+        assertEq(token.balanceOf(alice), 10_000_000 ether - 500 ether);
         assertEq(brain.totalBurned(), 500 ether);
         (uint128 fed,,) = brain.caretakers(alice);
         assertEq(fed, 500 ether);
@@ -183,10 +184,10 @@ contract FlyBrainTest is Test {
     }
 
     function test_stimulateBurnsAndSetsStimulus() public {
-        uint256 supplyBefore = token.totalSupply();
+        uint256 deadBefore = token.balanceOf(brain.DEAD());
         vm.prank(bob);
         brain.stimulate(TURN_RIGHT, 0, 5, 0);
-        assertEq(token.totalSupply(), supplyBefore - 5 * STIM_PRICE);
+        assertEq(token.balanceOf(brain.DEAD()), deadBefore + 5 * STIM_PRICE);
         (uint8 ch, uint8 param, uint16 strength, uint64 until, bool active) = brain.activeStimulus();
         assertEq(ch, TURN_RIGHT);
         assertEq(param, 0);
@@ -263,10 +264,10 @@ contract FlyBrainTest is Test {
         assertTrue(px != 0 || py != 0, "should have walked");
 
         vm.roll(block.number + 100);
-        uint256 supplyBefore = token.totalSupply();
+        uint256 deadBefore = token.balanceOf(brain.DEAD());
         vm.prank(bob);
         brain.resurrect(2000 ether);
-        assertEq(token.totalSupply(), supplyBefore - RESURRECT_PRICE - 2000 ether);
+        assertEq(token.balanceOf(brain.DEAD()), deadBefore + RESURRECT_PRICE + 2000 ether);
         assertTrue(brain.alive());
         assertEq(brain.generation(), 1);
         assertEq(brain.energy(), 2000);

@@ -3,10 +3,9 @@ pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-interface IFlyToken is IERC20, IERC20Permit {
-    function burnFrom(address account, uint256 value) external;
-}
+interface IFlyToken is IERC20, IERC20Permit {}
 
 /// @title FlyBrain — a living fruit-fly neural circuit on BNB Smart Chain
 ///
@@ -19,7 +18,7 @@ interface IFlyToken is IERC20, IERC20Permit {
 ///         lineage live in this contract's storage.
 ///
 ///         - anyone can `tick()` the brain forward (it costs a fraction of a cent on BSC)
-///         - holders burn $FLY to `feed()` it energy, or `stimulate()` its neurons
+///         - holders burn $FLY (sent to 0x...dEaD) to `feed()` it energy, or `stimulate()` its neurons
 ///         - when energy runs out it dies: the brain state is frozen, hashed and
 ///           recorded in `lineage`; `resurrect()` burns $FLY and the same brain wakes
 ///           up in a new body. Nothing is ever lost. That is the immortality.
@@ -29,6 +28,11 @@ interface IFlyToken is IERC20, IERC20Permit {
 ///         between ticks). No randomness from block data is used; background noise
 ///         is keccak256(stepNumber).
 contract FlyBrain {
+    using SafeERC20 for IFlyToken;
+
+    /// Tokens the fly consumes are sent here. Nothing can ever move them again.
+    address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
+
     // ------------------------------------------------------------------ types
 
     /// Neuron cell types as encoded in the circuit table.
@@ -328,8 +332,8 @@ contract FlyBrain {
     }
 
     function _burn(address from, uint256 amount) private {
-        token.burnFrom(from, amount);
         totalBurned += amount;
+        token.safeTransferFrom(from, DEAD, amount);
     }
 
     function _feed(address from, uint256 amount) private {

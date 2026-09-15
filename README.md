@@ -44,6 +44,17 @@
   Nothing is ever lost.
 </p>
 
+## Live on BNB Smart Chain
+
+| | Address |
+|---|---|
+| `$FLY` token (Immortal Fruit Flies) | [`0x23791aa3b031659b593cf141a2bc76b0ad657777`](https://bscscan.com/token/0x23791aa3b031659b593cf141a2bc76b0ad657777) |
+| `FlyBrain` (the genesis fly) | [`0x32D28e97b50f5978eb51d7608492CC7221b01f63`](https://bscscan.com/address/0x32D28e97b50f5978eb51d7608492CC7221b01f63) |
+| circuit table (SSTORE2 data contract) | [`0x8191174505B6692139A3571Fa4767049acc92eEc`](https://bscscan.com/address/0x8191174505B6692139A3571Fa4767049acc92eEc) |
+
+Circuit table keccak256: `0xffbe0e7f28e1f0dd2cfaa01d1d221c502bf41c1fd519ebfe8d9b8203e7cedfc2`
+FlyWire connections file sha256: `24f960ae3e7d4f8cd30db3b62e99fb5179cc3d1e76d8c155bfb441e9737d3faf`
+
 ---
 
 ## What this is
@@ -84,7 +95,7 @@ Everything that is burned is gone. Total supply only goes down.
 
 ## Token
 
-`ImmortalFly.sol` is a plain BEP-20 (OpenZeppelin ERC20 + Burnable + Permit). Fixed supply, minted once. No owner, no mint, no tax, no blacklist, no pause, no proxy. `FlyBrain` is the only thing that burns it, and only when you ask it to.
+`$FLY` is the BEP-20 at the address above (1,000,000,000 supply, 18 decimals, ownership renounced, EIP-2612 permit). Tokens the fly consumes are sent to `0x…dEaD`; nothing can move them again. `ImmortalFly.sol` in this repo is the reference token used by the test-suite.
 
 ## Repo
 
@@ -131,10 +142,11 @@ forge script script/Deploy.s.sol --rpc-url bsc --broadcast --verify -vvvv
 
 - [x] circuit extracted from FlyWire v783, packed, verified
 - [x] `FlyBrain.sol` + `ImmortalFly.sol`
-- [ ] parameter calibration (stable bump, turning, shock recovery)
-- [ ] tests + gas report
-- [ ] website
-- [ ] BSC testnet
-- [ ] BSC mainnet
+- [x] ring geometry from anatomy (each EPG's angle in the ellipsoid body, from 110k synapse positions)
+- [x] parameter calibration (stable bump, turns with PEN drive, collapses under Δ7 shock)
+- [x] 17 Foundry tests
+- [x] BSC mainnet: genesis fly deployed
+- [ ] website / dapp
+- [ ] keeper bot
 
 Not financial advice. It is a fly.

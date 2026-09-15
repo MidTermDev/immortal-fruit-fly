@@ -11,7 +11,8 @@
  "total_synapses_in_circuit": 45961,
  "synapses_kept": 45961,
  "table_bytes": 15065,
- "table_keccak256": "0x2bac7f433960128ed026c680bd3cf2405b762c8fa82b750172e1f80644c7a61d",
- "ring_geometry": "Laplacian eigenmap of symmetrised two-hop excitatory EPG->{PEG,PEN}->EPG connectivity; wedges = 16 equal angular bins",
+ "table_keccak256": "0xffbe0e7f28e1f0dd2cfaa01d1d221c502bf41c1fd519ebfe8d9b8203e7cedfc2",
+ "ring_geometry": "anatomical: circular mean of each neuron's ellipsoid-body synapse positions (FlyWire synapse table), 50/51 EPG; wedges = 16 equal angular bins",
+ "synapse_file_for_geometry": "flywire_synapses_783.feather (doi:10.5281/zenodo.10676866)",
  "wedges": 16
 }

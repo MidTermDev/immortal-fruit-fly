@@ -2,7 +2,7 @@
 .venv/
 __pycache__/
 *.pyc
-
+deploy.txt
 # large datasets (download with sim/fetch_data.sh)
 data/*.feather
 data/*.tsv
@@ -27,3 +27,5 @@ image.png
 data/syn.part*
 data/dl_syn.log
 data/dl_synapses.sh
+deploy.txt
+*.key

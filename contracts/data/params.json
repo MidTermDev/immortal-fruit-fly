@@ -1,1 +1,1 @@
-{"leak": 176, "thresh": 1000, "reset": -500, "vMin": -4000, "gains": [233, 15, 2, 11, 77, -216], "gBias": 4, "noise": 41, "stimGain": 176, "stimTTL": 64, "walkThreshold": 100, "maxSteps": 64}
+{"leak": 95, "thresh": 1000, "reset": -500, "vMin": -4000, "gains": [190, 114, 5, 108, 7, -297], "gBias": 4, "noise": 35, "stimGain": 157, "stimTTL": 64, "walkThreshold": 100, "maxSteps": 64}

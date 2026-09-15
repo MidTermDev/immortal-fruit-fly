@@ -88,6 +88,30 @@ print('mean angular distance of strongest EPG->Δ7->EPG inhibition: %.1f° (expe
 same = W[np.ix_(EPG, PEG)] @ W[np.ix_(PEG, EPG)] > 0
 print('mean angular distance of EPG->PEG->EPG excitation: %.1f° (expect small)' % np.degrees(dphi[same & ~np.eye(len(EPG), dtype=bool)].mean()))
 
+# ---------------------------------------------- anatomical override
+# If sim/eb_angles.py has been run, use each neuron's real angular position in the
+# ellipsoid body (from synapse coordinates) instead of the wiring-derived estimate.
+EB = os.path.join(ROOT, 'data', 'eb_angles.json')
+geometry_method = 'spectral (Laplacian eigenmap of two-hop excitatory EPG connectivity)'
+anat_pp = {}
+if os.path.exists(EB):
+    eb = json.load(open(EB))['angles']
+    ids_epg = [str(int(r)) for r in ring.root_id.values[EPG]]
+    have = np.array([r in eb for r in ids_epg])
+    ang_eb = np.array([eb[r]['angle'] if r in eb else np.nan for r in ids_epg])
+    # align the spectral estimate to anatomy (sign + offset) to fill any EPG without EB synapses
+    best = None
+    for sgn in (1, -1):
+        z = np.exp(1j * (ang_eb[have] - sgn * ang[have]))
+        if best is None or abs(z.mean()) > best[0]: best = (abs(z.mean()), sgn, np.angle(z.mean()))
+    _, sgn, off0 = best
+    print('spectral vs anatomical agreement: %.2f (1 = identical up to rotation)' % best[0])
+    filled = (sgn * ang + off0) % (2 * np.pi)
+    ang = np.where(have, ang_eb, filled)
+    anat_pp = {str(int(r)): eb[str(int(r))]['angle'] for r in ring.root_id.values[np.concatenate([PEG, PEN])] if str(int(r)) in eb}
+    geometry_method = 'anatomical: circular mean of each neuron\'s ellipsoid-body synapse positions (FlyWire synapse table), %d/%d EPG' % (have.sum(), len(EPG))
+print('geometry:', geometry_method)
+
 # Orientation: make TURN_LEFT (left-hemisphere PEN) rotate the bump counter-clockwise (increasing angle).
 # Left PEN neurons read EPG at wedge w and write to wedge w+1 (in some sign). Measure the sign.
 sideb = ring.sideb.values
@@ -102,7 +126,8 @@ def pen_shift(side):
     return tot
 left_shift = pen_shift(0); right_shift = pen_shift(1)
 print('PEN left shift sum %.2f, right shift sum %.2f' % (left_shift, right_shift))
-if left_shift < 0:
+flip = left_shift < 0
+if flip:
     ang = -ang
     print('flipped ring orientation so left-PEN drive rotates the bump counter-clockwise')
 
@@ -123,10 +148,14 @@ angle = np.full(N, np.nan)
 wedge[EPG] = wedge_epg
 angle[EPG] = ang
 for i in np.concatenate([PEG, PEN]):
-    out = W[i, EPG]; inn = W[EPG, i]
-    v = out if out.sum() > 0 else inn
-    if v.sum() == 0: continue
-    a = np.angle((v * np.exp(1j * ang)).sum()) % (2 * np.pi)
+    rid = str(int(ring.root_id[i]))
+    if rid in anat_pp:
+        a = ((-anat_pp[rid] if flip else anat_pp[rid]) - off) % (2 * np.pi)
+    else:
+        out = W[i, EPG]; inn = W[EPG, i]
+        v = out if out.sum() > 0 else inn
+        if v.sum() == 0: continue
+        a = np.angle((v * np.exp(1j * ang)).sum()) % (2 * np.pi)
     angle[i] = a
     wedge[i] = int(a / (2 * np.pi / WEDGES)) % WEDGES
 for i in D7:
@@ -187,7 +216,8 @@ meta = {
     'circuit': 'head-direction ring attractor: EPG, EPGt, PEG, PEN_a, PEN_b, Delta7',
     'N': N, 'S': S, 'synapse_threshold': th, 'total_synapses_in_circuit': int(pairs.syn_count.sum()),
     'synapses_kept': int(keep.syn_count.sum()), 'table_bytes': size, 'table_keccak256': circuit_hash,
-    'ring_geometry': 'Laplacian eigenmap of symmetrised two-hop excitatory EPG->{PEG,PEN}->EPG connectivity; wedges = 16 equal angular bins',
+    'ring_geometry': geometry_method + '; wedges = 16 equal angular bins',
+    'synapse_file_for_geometry': 'flywire_synapses_783.feather (doi:10.5281/zenodo.10676866)',
     'wedges': WEDGES,
 }
 json.dump({'meta': meta, 'neurons': neurons, 'synapses': synapses}, open(os.path.join(ROOT, 'data', 'circuit.json'), 'w'), indent=1)
