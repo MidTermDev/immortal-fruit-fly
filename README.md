@@ -107,10 +107,12 @@ Everything that is burned is gone. Total supply only goes down.
 ```
 brand/       the fly (ASCII + PNG)
 brand/       the fly (ASCII + PNG)
-contracts/   Foundry project: ImmortalFly.sol (token), FlyBrain.sol (organism), tests, deploy script
-sim/         build_circuit.py (FlyWire -> on-chain table), flysim.py (bit-exact Python replica), calibration
-site/        the website (Three.js brain, live on-chain state, feed / poke the fly)
+contracts/   Foundry project: FlyBrain.sol (organism), ImmortalFly.sol (reference token), tests incl. mainnet replay, deploy script
+sim/         build_circuit.py (FlyWire -> on-chain table), eb_angles.py (ring geometry from synapse positions), flysim.py (bit-exact replica), calibrate.py
+web/         the website: Next.js dapp (Three.js brain, live on-chain state, feed / poke / resurrect) + documentation
+keeper/      keeper bot that ticks the brain
 data/        circuit.json — the 155 neurons, their FlyWire root IDs, wedges and synapses
+ROADMAP.md   where this goes: reflexes, learning, colony, whole brain
 ```
 
 ### Build
@@ -151,7 +153,8 @@ forge script script/Deploy.s.sol --rpc-url bsc --broadcast --verify -vvvv
 - [x] parameter calibration (stable bump, turns with PEN drive, collapses under Δ7 shock)
 - [x] 17 Foundry tests
 - [x] BSC mainnet: genesis fly deployed
-- [x] website / dapp: https://midtermdev.github.io/immortal-fruit-fly/
+- [x] website / dapp + docs (Next.js): https://midtermdev.github.io/immortal-fruit-fly/
+- [x] vision + roadmap: https://midtermdev.github.io/immortal-fruit-fly/docs/vision/
 - [x] source verified (Sourcify exact match)
 - [x] v2 brain: persistent synaptic input, calibration robust across trajectories, assembly inner loop
 - [x] keeper bot running (32 steps every 10 minutes)
