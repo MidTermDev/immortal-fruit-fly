@@ -252,14 +252,17 @@ footer a:hover { color: var(--text); }
   .docs-nav .lbl { display: none; }
 }
 @media (max-width: 620px) {
+  .topbar .wrap { gap: 10px; }
+  .brand { font-size: 12px; letter-spacing: 0.03em; }
+  .topbar .btn.quiet { display: none; }
   .four, .stats, .phases, .hashes, .doc-cards, .side { grid-template-columns: 1fr; }
   .vitals .wrap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .vital { border-right: 0; padding-left: 0; }
   .vital:nth-child(even) { padding-left: 18px; border-left: 1px solid var(--hair); }
   .feed-row { grid-template-columns: 1fr; gap: 3px; }
-  .hero { height: auto; min-height: 0; padding-top: 340px; }
+  .hero { height: auto; min-height: 0; padding-top: 300px; }
   .hero canvas { height: 420px; }
-  .hero-copy { position: static; padding: 0 var(--gutter) 40px; }
+  .hero-copy { position: relative; z-index: 2; inset: auto; padding: 0 var(--gutter) 44px; }
   .hero-hint, .hero-tag { display: none; }
   .side { grid-template-columns: 1fr; min-height: 0; }
   .instr-body.fill { min-height: 230px; }

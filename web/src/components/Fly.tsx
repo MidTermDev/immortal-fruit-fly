@@ -123,7 +123,7 @@ export default function Fly() {
     const drawDial = () => {
       const c = dialRef.current; if (!c) return; const g = c.getContext("2d")!;
       const r = c.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
-      const css = Math.max(1, Math.floor(Math.min(r.width, r.height)));
+      const css = Math.max(1, Math.floor(Math.min(r.width, r.height, 300)));
       if (c.style.width !== css + "px") { c.style.width = css + "px"; c.style.height = css + "px"; }
       const S = Math.max(1, Math.round(css * dpr));
       if (c.width !== S || c.height !== S) { c.width = S; c.height = S; }
