@@ -40,11 +40,15 @@ export const CFG = {
   core: "0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3",
   // Block FlyCore was deployed in (0 = unknown: event scans fall back to the registry's deploy block).
   coreDeployBlock: 122089807,
-  bodies: { arena: "0x47005543c06246124480D196a275327325695BEd", doom: "0x642ebC7fD62a24406d8A86885F0131472E641c86" },
+  bodies: { arena: "0x47005543c06246124480D196a275327325695BEd", doom: "0x642ebC7fD62a24406d8A86885F0131472E641c86", host: "0x4fC3E7D1fAD1A8E7FAC849DAa5BfF0C8333fe2a6" },
   // Element is the NFT marketplace that indexes BNB Chain collections (OpenSea does not list BSC).
   market: { name: "Element", asset: "https://element.market/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813", collection: "https://element.market/collections/immortal-fruit-flies-1" },
   ipfsGateway: "https://gateway.pinata.cloud/ipfs/",
   liveFallback: process.env.NEXT_PUBLIC_LIVE_URL || "",
+  // The brain host (brain/HOST_PROTOCOL.md) announces its public origin in bodies(host).uri, like the arena. For local
+  // development NEXT_PUBLIC_HOST_URL overrides it (http://localhost:9100 against a local server.py --remote-body); with
+  // the override set, every living fly's page probes that host, whatever body the registry names.
+  hostOverride: process.env.NEXT_PUBLIC_HOST_URL || "",
   circuitPtr: "0x2eE3C5168CD3F60E87693716E660470011EA9C7e",
   deployer: "0xA2eD0B7da1C7b5ee1af819CA281F4894B1700e27",
   links: {

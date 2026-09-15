@@ -315,6 +315,17 @@ input.text:focus, .field select:focus { border-color: var(--ink); outline: none;
   .arch { grid-template-columns: 1fr; gap: 12px 0; }
   .arch .link { flex-direction: row; justify-content: center; }
 }
+/* a fly living on the brain host (LifeStream): the world cell reuses .b-arena, the region cell the .dnbar rows */
+.life-b { background: var(--fig); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.life-mode { display: flex; flex-direction: column; gap: 4px; }
+.life-mode .lbl, .life-energy .lbl { color: var(--fig-dim); }
+.life-word { font-size: clamp(22px, 2.4vw, 30px); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; color: var(--fig-ink); }
+.life-word[data-mode="flee"] { color: var(--ice-fig); } .life-word[data-mode="eat"] { color: var(--amber-fig); } .life-word[data-mode="surge"], .life-word[data-mode="cast"] { color: #42b89e; }
+.life-energy { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--fig-rule); }
+.life-energy .mono { color: var(--fig-ink); font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.life-bars { display: flex; flex-direction: column; gap: 8px; }
+.life-bars .dnbar { grid-template-columns: 132px 1fr 34px; }
+.life-cap { color: var(--ink-2); }
 .prose .steps-list h3 { margin: 0 0 4px; }
 .prose .steps-list p { margin: 0; }
 .prose .steps-list > div { padding: 14px 0; }

@@ -17,7 +17,7 @@ export function FlyCard({ f, meta, names }: { f: FlyRecord; meta?: any; names?: 
       <div className="fc-b">
         <div className="fc-t"><span className="mono">#{pad(f.id)}</span><span className={`pill ${s.key}`}>{s.label}</span></div>
         <b>{f.name || `Fly #${f.id}`}</b>
-        <span className="fc-m">{f.alive ? (f.body !== ZERO ? `in ${bodyName(f.body, names)}${isCoreOnlyBody(f.body) ? " (core only)" : ""} · ${hms(f.energy)} at last checkpoint` : `${hms(f.energy)} banked`) : `died ${f.deaths}× · gen ${f.generation}`}</span>
+        <span className="fc-m">{f.alive ? (f.body !== ZERO ? `in ${bodyName(f.body, names)}${isCoreOnlyBody(f.body) ? " (a pebble)" : ""} · ${hms(f.energy)} at last checkpoint` : `${hms(f.energy)} banked`) : `died ${f.deaths}× · gen ${f.generation}`}</span>
         <span className="fc-m dim">gen {f.generation} · step {fmt(f.brainStep)} · {f.parentA ? `child of #${f.parentA} × #${f.parentB}` : "genesis"}</span>
       </div>
     </Link>

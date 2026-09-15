@@ -63,15 +63,20 @@ static void computeActivity(const Core& c, float act[WEDGES], int& bump) {
 }
 
 static void pushSense(Sense k, uint8_t wedge, uint8_t strength) {
-  SenseEvent e{k, wedge, strength};
+  SenseEvent e{k, wedge, strength, millis()};
   xQueueSend(g_senseQueue, &e, 0);   // drop when the chain task is behind
+}
+// the same sense for the brain host (POST /sense); the host task rate-limits it to one a second
+static void pushHostSense(Sense k, uint8_t wedge, uint8_t strength) {
+  SenseEvent e{k, wedge, strength, millis()};
+  if (g_hostSenseQueue) xQueueSend(g_hostSenseQueue, &e, 0);
 }
 
 static void replicaTask(void*) {
   const TickType_t period = pdMS_TO_TICKS(1000 / LOCAL_STEPS_PER_S);
   TickType_t last = xTaskGetTickCount();
   uint32_t lastMagMs = 0, lastLandmarkEventMs = 0, lastShockEventMs = 0;
-  bool prevL = false, prevR = false, prevLm2 = false, prevSpider = false;
+  bool prevL = false, prevR = false, prevLm2 = false, prevSpider = false; int prevTouch = -1;
   uint32_t spikeWindow = 0, windowStartMs = millis();
   float binsDecay[WEDGES] = {0};
   float headX = 0, headY = 0;
@@ -83,7 +88,9 @@ static void replicaTask(void*) {
     { Lock l(g_senseMutex); s = g_sense; }
     uint32_t now = millis();
 
-    // sense edges -> interactions (rate-limited: HARDWARE.md §4.4 counts ~35k gas per interaction)
+    // sense edges -> interactions (rate-limited: HARDWARE.md §4.4 counts ~35k gas per interaction) and, when a
+    // brain host runs the whole brain, the same edges as sense events in the fly's world (every edge; the host task
+    // keeps them to one a second)
     if (s_hosting) {
       bool landmark = (s.hallL && !prevL) || (s.hallR && !prevR) || (s.hallLm2 && !prevLm2);
       if (landmark && now - lastLandmarkEventMs >= LANDMARK_INTERACTION_EVERY_S * 1000UL) {
@@ -92,14 +99,19 @@ static void replicaTask(void*) {
         else if (s.hallR && !prevR) pushSense(Sense::LANDMARK_R, HALL_R_WEDGE, HALL_CUE_STRENGTH);
         else pushSense(Sense::LANDMARK_2, HALL_LM2_WEDGE, HALL_CUE_STRENGTH);
       }
+      if (s.hallL && !prevL) pushHostSense(Sense::LANDMARK_L, HALL_L_WEDGE, HALL_CUE_STRENGTH);
+      if (s.hallR && !prevR) pushHostSense(Sense::LANDMARK_R, HALL_R_WEDGE, HALL_CUE_STRENGTH);
+      if (s.hallLm2 && !prevLm2) pushHostSense(Sense::LANDMARK_2, HALL_LM2_WEDGE, HALL_CUE_STRENGTH);
       if (s.hallSpider && !prevSpider && now - lastShockEventMs >= LANDMARK_INTERACTION_EVERY_S * 1000UL) {
         lastShockEventMs = now;
         pushSense(Sense::SHOCK, 0, SHOCK_STRENGTH);
       }
+      if (s.hallSpider && !prevSpider) pushHostSense(Sense::SHOCK, 0, SHOCK_STRENGTH);
+      if (s.touchWedge >= 0 && s.touchWedge != prevTouch) pushHostSense(Sense::TOUCH, (uint8_t)s.touchWedge, TOUCH_CUE_STRENGTH);
     }
     bool shockEdge = s.hallSpider && !prevSpider;
     if (shockEdge && s_hosting) uiFlash();   // the screen flashes, the fly freezes
-    prevL = s.hallL; prevR = s.hallR; prevLm2 = s.hallLm2; prevSpider = s.hallSpider;
+    prevL = s.hallL; prevR = s.hallR; prevLm2 = s.hallLm2; prevSpider = s.hallSpider; prevTouch = s.touchWedge;
 
     // choose this step's stimulus by priority: shock > landmark (hall) > touch > turn > magnetic north
     uint8_t ch = CH_NONE, param = 0, strength = 0; bool isHall = false, isTouch = false, isMag = false;

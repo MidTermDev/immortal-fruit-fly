@@ -51,3 +51,5 @@ web/.next.pid
 web/*.png
 firmware/include/secrets.h
 firmware/.pio/
+brain/state_*/
+brain/host_url.txt

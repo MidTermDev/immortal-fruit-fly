@@ -500,6 +500,22 @@ bool Registry::isBody(const uint8_t who[20], bool& out) {
   return true;
 }
 
+// bodies(address) is a public mapping getter: its return is the struct's members side by side (string name,
+// string uri, uint64 registeredBlock, uint32 flies), not a wrapped tuple like fly(id)
+bool Registry::body(const uint8_t who[20], std::string& name, std::string& uri, uint64_t* registeredBlock, uint32_t* flies) {
+  Bytes ret;
+  if (!c.ethCall(addr, ethtx::AbiEncoder("bodies(address)").address(who).finish(), ret)) return false;
+  ethtx::AbiDecoder d(ret);
+  if (d.words() < 4) { setError("bodies: short"); return false; }
+  uint64_t offName = d.uint(0), offUri = d.uint(1);
+  if (offName + 32 > ret.size() || offUri + 32 > ret.size()) { setError("bodies: bad offsets"); return false; }
+  name = d.string(0);
+  uri = d.string(1);
+  if (registeredBlock) *registeredBlock = d.uint(2);
+  if (flies) *flies = (uint32_t)d.uint(3);
+  return true;
+}
+
 // gas limits: HARDWARE.md §4.4 with ~50% headroom (unused gas is refunded)
 bool Registry::registerBody(Wallet& w, const std::string& name, const std::string& uri, uint8_t tx[32]) {
   return sendCall(c, w, addr, ethtx::AbiEncoder("registerBody(string,string)").string(name).string(uri).finish(), 200000, tx);

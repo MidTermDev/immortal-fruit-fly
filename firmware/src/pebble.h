@@ -8,7 +8,9 @@
 //   g_sense        SenseFrame     UI/sensors write, replica reads    -> g_senseMutex
 //   g_cmdQueue     Cmd            UI -> chain task
 //   g_senseQueue   SenseEvent     replica -> chain task (interactions)
-//   g_sound        int (atomic)   chain -> UI (speaker)
+//   g_hostSenseQueue SenseEvent   replica -> host task (POST /sense to the brain host)
+//   g_host         HostView       host task writes (frames, trail), UI copies, chain task reads energy -> g_hostMutex
+//   g_sound        int (atomic)   chain/host -> UI (speaker)
 #pragma once
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
@@ -18,15 +20,16 @@
 #include <string>
 #include "flycore.h"
 #include "rpc.h"
+#include "hostframe.h"
 #include "config.h"
 
 namespace rpc { const char* lastError(); }   // implemented in lib/rpc/rpc.cpp (not part of the fixed rpc.h)
 
 enum class Phase : uint8_t { BOOT, PROVISION, CONNECT, REGISTER, WAIT, HOST, DEAD };
 enum class Cmd : uint8_t { HATCH, HANDOFF_SCAN, HANDOFF_CONFIRM, HANDOFF_CANCEL };
-enum class Sense : uint8_t { LANDMARK_L, LANDMARK_R, LANDMARK_2, SHOCK };
-struct SenseEvent { Sense kind; uint8_t wedge; uint8_t strength; };
-enum Sound : int { SND_NONE = 0, SND_CHIRP = 1, SND_DEATH = 2, SND_TICK = 3 };
+enum class Sense : uint8_t { LANDMARK_L, LANDMARK_R, LANDMARK_2, SHOCK, TOUCH };   // TOUCH goes to the host only
+struct SenseEvent { Sense kind; uint8_t wedge; uint8_t strength; uint32_t ms; };   // ms: millis() when sensed
+enum Sound : int { SND_NONE = 0, SND_CHIRP = 1, SND_DEATH = 2, SND_TICK = 3, SND_BLIP = 4, SND_LOW = 5 };
 
 // What the senses say right now (written by the UI task, which owns the I2C bus, read by the replica task).
 struct SenseFrame {
@@ -81,8 +84,29 @@ struct BodyState {
   bool showedKey = false;
 };
 
+// The brain host's stream as the pebble sees it (brain/HOST_PROTOCOL.md; guarded by g_hostMutex). The host task
+// writes it; the UI copies it every frame; the chain task reads the energy and alive flag from it.
+struct HostView {
+  bool originKnown = false; char origin[128] = "";   // "https://xxx.trycloudflare.com" (no trailing slash), from bodies(FLY_HOST_ADDR).uri
+  uint32_t originMs = 0;                             // when it was resolved
+  bool connected = false;                            // the WebSocket is open (or polling is delivering)
+  bool wsMode = true;                                // WebSocket vs /frame polling right now
+  bool haveFrame = false; uint32_t frameMs = 0;      // millis() of the newest frame
+  uint32_t frames = 0;                               // frames received (the chain task notices new ones by this)
+  hostframe::LiteFrame frame;
+  int trailN = 0, trailHead = 0;                     // ring of the last HOST_TRAIL_LEN positions
+  float trailX[HOST_TRAIL_LEN], trailY[HOST_TRAIL_LEN];
+  char diary[hostframe::EVENT_LEN] = "";             // the newest diary line
+  char lastError[48] = ""; uint32_t lastErrorMs = 0;
+  uint32_t sensesSent = 0;
+};
+inline bool hostFresh(const HostView& h, uint32_t now) { return h.haveFrame && (uint32_t)(now - h.frameMs) < HOST_STALE_MS; }
+
 extern BodyState g_state;
 extern SemaphoreHandle_t g_stateMutex;
+extern HostView g_host;
+extern SemaphoreHandle_t g_hostMutex;
+extern QueueHandle_t g_hostSenseQueue;
 extern flycore::Core* g_replica;
 extern flycore::Circuit g_circuit;
 extern SemaphoreHandle_t g_replicaMutex;

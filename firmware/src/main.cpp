@@ -11,6 +11,7 @@
 #include "sensors.h"
 #include "replica.h"
 #include "chain.h"
+#include "host.h"
 #include "ble.h"
 #include "ui.h"
 
@@ -26,8 +27,12 @@ SenseFrame g_sense;
 SemaphoreHandle_t g_senseMutex = nullptr;
 QueueHandle_t g_cmdQueue = nullptr;
 QueueHandle_t g_senseQueue = nullptr;
+HostView g_host;
+SemaphoreHandle_t g_hostMutex = nullptr;
+QueueHandle_t g_hostSenseQueue = nullptr;
 volatile int g_sound = SND_NONE;
 rpc::Wallet g_wallet;
+static bool s_viewLife = true;   // button B: Life (the brain host's stream) or Compass (the on-chain core)
 
 void setStatus(const char* fmt, ...) {
   char b[sizeof g_state.status];
@@ -62,8 +67,10 @@ void setup() {
   Serial.begin(115200);
   M5.Speaker.setVolume(SPEAKER_VOLUME);
   g_stateMutex = xSemaphoreCreateMutex();
+  g_hostMutex = xSemaphoreCreateMutex();
   g_cmdQueue = xQueueCreate(4, sizeof(Cmd));
   g_senseQueue = xQueueCreate(8, sizeof(SenseEvent));
+  g_hostSenseQueue = xQueueCreate(8, sizeof(SenseEvent));
   uiInit();
   uiBootMessage("booting", "immortal fruit fly pebble");
 
@@ -115,6 +122,7 @@ void setup() {
   bool ble = bleStart(g_wallet.addr);
   { Lock l(g_stateMutex); g_state.ble = ble; }
   replicaStart();
+  hostStart();
   chainStart(nc.rpcUrl);
 }
 
@@ -127,6 +135,8 @@ static void playSounds() {
   if (s == SND_CHIRP) { M5.Speaker.tone(1760, 60); delay(70); M5.Speaker.tone(2349, 60); delay(70); M5.Speaker.tone(2960, 90); }
   else if (s == SND_DEATH) { M5.Speaker.tone(196, 700); }
   else if (s == SND_TICK) { M5.Speaker.tone(1200, 15); }
+  else if (s == SND_BLIP) { M5.Speaker.tone(3520, 25); }                                   // jumped
+  else if (s == SND_LOW) { M5.Speaker.tone(147, 250); delay(260); M5.Speaker.tone(110, 350); }   // caught
 }
 
 static void handleButtons(BodyState& s) {
@@ -144,12 +154,13 @@ static void handleButtons(BodyState& s) {
     }
   } else bothSince = 0;
 
-  // hand-off: hold B to scan, B to confirm, A/C to cancel
+  // hosting: B toggles Life / Compass; hold B to scan for a hand-off, B to confirm, A/C to cancel
   if (s.phase == Phase::HOST) {
     if (s.candidate) {
       if (M5.BtnB.wasClicked()) { Cmd c = Cmd::HANDOFF_CONFIRM; xQueueSend(g_cmdQueue, &c, 0); }
       else if (M5.BtnA.wasClicked() || M5.BtnC.wasClicked() || millis() - s.candidateMs > HANDOFF_CONFIRM_S * 1000UL) { Cmd c = Cmd::HANDOFF_CANCEL; xQueueSend(g_cmdQueue, &c, 0); }
     } else if (M5.BtnB.wasHold() && !s.scanning) { Cmd c = Cmd::HANDOFF_SCAN; xQueueSend(g_cmdQueue, &c, 0); }
+    else if (M5.BtnB.wasClicked()) s_viewLife = !s_viewLife;
     return;
   }
   // hatch: B twice within HATCH_CONFIRM_S on a pebble that has $FLY and no fly
@@ -184,7 +195,11 @@ void loop() {
 
   RingData r;
   { Lock l(g_replicaMutex); r = g_ring; }
-  touchWedge = uiFrame(s, r, netConnected(), replicaHosting());
+  static HostView h;   // ~5 KB: a static copy, not a stack one
+  { Lock l(g_hostMutex); h = g_host; }
+  // the Life view while the host's frames are fresh (and the user did not switch to the compass); else the compass
+  bool life = s_viewLife && s.phase == Phase::HOST && hostFresh(h, millis()) && h.frame.generation == s.generation;
+  touchWedge = uiFrame(s, r, h, netConnected(), replicaHosting(), life);
 
   // pace the loop to UI_FPS without ever blocking on the network
   uint32_t spent = millis() - t0;

@@ -4,6 +4,7 @@ import { CFG } from "@/lib/config";
 import Link from "next/link";
 import { Chain, LogScan } from "@/lib/chain";
 import { BrainLive } from "@/lib/brain3d";
+import { drawArena as drawWorld } from "@/lib/arena";
 import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, status, bodyName, scanLabel } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
 
@@ -16,6 +17,7 @@ export default function LiveFly() {
   const arenaRef = useRef<HTMLCanvasElement>(null);
   const chainRef = useRef<Chain | null>(null);
   const frameRef = useRef<Frame | null>(null);
+  const trailRef = useRef<number[][]>([]);   // the fly's path, kept client-side (the server sends only its position)
   const spikeRate = useRef(0);
   const [h, setH] = useState<any>(null);            // latest header from the live server
   const [live, setLive] = useState<"connecting" | "live" | "offline">("connecting");
@@ -69,33 +71,7 @@ export default function LiveFly() {
       } catch (e) { console.warn("chain unavailable", e); }
       setOrigin(org); connect(org);
     })();
-    const drawArena = () => {
-      const c = arenaRef.current, f = frameRef.current; if (!c) return; const g = c.getContext("2d")!;
-      const r = c.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2); const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
-      if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
-      g.clearRect(0, 0, W, H);
-      const A = f ? f.hdr.arena : 240, S = Math.min(W, H) * 0.96, sc = S / A, cx = W / 2, cy = H / 2;
-      const P = (x: number, y: number) => [cx + x * sc, cy - y * sc];
-      g.strokeStyle = "rgba(232,230,224,0.06)"; g.lineWidth = 1;
-      for (let v = -A / 2; v <= A / 2; v += 20) { const [x0, y0] = P(v, -A / 2), [x1, y1] = P(v, A / 2); g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); const [a0, b0] = P(-A / 2, v), [a1, b1] = P(A / 2, v); g.beginPath(); g.moveTo(a0, b0); g.lineTo(a1, b1); g.stroke(); }
-      g.strokeStyle = "rgba(232,230,224,0.35)"; g.strokeRect(cx - S / 2, cy - S / 2, S, S);
-      if (!f) { g.fillStyle = "rgba(232,230,224,0.4)"; g.font = `${Math.round(11 * dpr)}px ui-monospace, monospace`; g.textAlign = "center"; g.fillText("connecting to the live fly…", cx, cy); return; }
-      const hd = f.hdr;
-      // odor plumes
-      for (const fd of hd.food) { const [x, y] = P(fd.x, fd.y); const frac = fd.energy / Math.max(1, fd.energy0); const grd = g.createRadialGradient(x, y, 0, x, y, 30 * 2.2 * sc); grd.addColorStop(0, `rgba(240,180,41,${0.10 + 0.25 * frac})`); grd.addColorStop(1, "rgba(240,180,41,0)"); g.fillStyle = grd; g.beginPath(); g.arc(x, y, 30 * 2.2 * sc, 0, 7); g.fill(); }
-      for (const fd of hd.food) { const [x, y] = P(fd.x, fd.y); g.fillStyle = "#f0b429"; g.beginPath(); g.arc(x, y, Math.max(3, 3 * sc), 0, 7); g.fill(); g.fillStyle = "rgba(232,230,224,0.55)"; g.font = `${Math.round(9 * dpr)}px ui-monospace, monospace`; g.textAlign = "left"; g.fillText(`${Math.round(fd.energy)} s`, x + 6 * dpr, y - 5 * dpr); }
-      // predator
-      if (hd.predator) { const [x, y] = P(hd.predator.x, hd.predator.y); g.fillStyle = "rgba(88,196,245,0.8)"; g.beginPath(); g.arc(x, y, Math.max(4, hd.predator.size * sc), 0, 7); g.fill(); }
-      // path (from server: only current position; draw a trail we keep locally)
-      const tr = (drawArena as any).trail || ((drawArena as any).trail = []); const l = tr[tr.length - 1];
-      if (!l || Math.hypot(l[0] - hd.x, l[1] - hd.y) > 0.4) { tr.push([hd.x, hd.y]); if (tr.length > 1500) tr.shift(); }
-      g.strokeStyle = "rgba(240,180,41,0.55)"; g.lineWidth = Math.max(1, 1.2 * dpr); g.beginPath(); tr.forEach((p: number[], i: number) => { const [x, y] = P(p[0], p[1]); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke();
-      // fly
-      const [fx, fy] = P(hd.x, hd.y); g.save(); g.translate(fx, fy); g.rotate(-hd.heading); g.fillStyle = hd.alive ? "#ff5a35" : "#8a919c";
-      const L = Math.max(7, 4 * sc); g.beginPath(); g.moveTo(L, 0); g.lineTo(-L * 0.6, L * 0.45); g.lineTo(-L * 0.6, -L * 0.45); g.closePath(); g.fill(); g.restore();
-      g.fillStyle = "rgba(232,230,224,0.35)"; g.font = `${Math.round(9.5 * dpr)}px ui-monospace, monospace`; g.textAlign = "left"; g.textBaseline = "bottom";
-      g.fillText(`${A} × ${A} body lengths · ${hd.mode}`, cx - S / 2 + 8 * dpr, cy + S / 2 - 6 * dpr);
-    };
+    const drawArena = () => { const c = arenaRef.current; if (c) drawWorld(c, frameRef.current ? frameRef.current.hdr : null, trailRef.current); };
     return () => { running = false; clearTimeout(retry); clearInterval(poll); cancelAnimationFrame(raf); const s = ws; ws = null; try { s?.close(); } catch {}; if (brain) brain.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

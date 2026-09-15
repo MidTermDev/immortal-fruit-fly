@@ -25,17 +25,35 @@ export function bodyName(addr: string, names: Record<string, string> = {}) {
   return names[a] || short(addr);
 }
 
-/** A body that is neither the arena nor DOOM: a pebble (or any other registered body) that runs only the fly's on-chain core, while the whole brain sleeps. */
+/** A body that is neither the arena nor DOOM: a pebble (or any other registered body) that runs the fly's on-chain core itself and cannot run the whole brain; the brain host runs that for it, or it sleeps (see bodyNote). */
 export function isCoreOnlyBody(addr: string) {
   if (!addr || addr === ZERO) return false;
   const a = addr.toLowerCase();
   return a !== CFG.bodies.arena.toLowerCase() && a !== CFG.bodies.doom.toLowerCase();
 }
 
+/** Where a fly's whole brain is, in one place, so every page says the same thing. A pebble body signs for the fly on
+ *  the registry; the 139,248 neurons run on the brain host when the host answers `/fly/<id>/health` for that fly
+ *  (`hostServes` true), and sleep in the last committed snapshot when it does not (false, or null while unknown). */
+export function bodyNote(f: FlyRecord, hostServes: boolean | null, names: Record<string, string> = {}) {
+  const name = bodyName(f.body, names);
+  const out = (kind: "none" | "whole" | "host" | "core", tag: string, note: string, title = "") => ({ kind, name, tag, label: tag ? `${name} ${tag}` : name, note, title });
+  if (!f.alive || f.body === ZERO) return out("none", "", "");
+  if (!isCoreOnlyBody(f.body)) return out("whole", "", `running in ${name}`);
+  if (hostServes) return out("host", "· whole brain on the brain host", `running in ${name}, a pebble that signs for it while the brain host runs its whole brain`, "The pebble is the body on the registry and signs every commit; the brain host runs the 139,248 neurons for it and streams its life here");
+  return out("core", "(core only: the whole brain sleeps)", `running in ${name}, core only: the whole brain sleeps`, "A pebble runs only the fly's on-chain compass core; the whole-brain snapshot is preserved until a whole-brain body, or the brain host, takes it up");
+}
+
+/** The brain host's origin for a page to probe: the development override, else the https origin the host registered as its body uri. */
+export function hostOrigin(uri: string) {
+  if (CFG.hostOverride) { try { return new URL(CFG.hostOverride).origin; } catch { return ""; } }
+  return /^https:\/\//.test(uri || "") ? new URL(uri).origin : "";
+}
+
 /** One word for where the organism is right now. */
-export function status(f: FlyRecord, names: Record<string, string> = {}) {
+export function status(f: FlyRecord, names: Record<string, string> = {}, hostServes: boolean | null = null) {
   if (!f.alive) return { key: "dead", label: "dead", note: "brain frozen at its last state; resurrect to continue it" };
-  if (f.body !== ZERO) return { key: "alive", label: "alive", note: isCoreOnlyBody(f.body) ? `running in ${bodyName(f.body, names)}, core only: the whole brain sleeps` : `running in ${bodyName(f.body, names)}` };
+  if (f.body !== ZERO) return { key: "alive", label: "alive", note: bodyNote(f, hostServes, names).note };
   if (f.pendingBody !== ZERO) return { key: "waiting", label: "assigned", note: `waiting for ${bodyName(f.pendingBody, names)} to accept it` };
   return { key: "dormant", label: "dormant", note: "alive but not running anywhere; its energy is frozen" };
 }

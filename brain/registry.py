@@ -51,12 +51,34 @@ class Registry:
         self.pinata = Pinata()
 
     # ---------------------------------------------------------------- reads
+    FLY_KEYS = ['connectome', 'model', 'generation', 'deaths', 'parentA', 'parentB', 'stateRoot', 'memoryRoot', 'stateURI', 'brainStep', 'energy', 'bornBlock', 'lastCommitBlock', 'body', 'pendingBody', 'alive']
+
+    def _fly_dict(self, fid, row):
+        d = dict(zip(self.FLY_KEYS, row)); d['connectome'] = d['connectome'].hex(); d['stateRoot'] = d['stateRoot'].hex(); d['memoryRoot'] = d['memoryRoot'].hex(); d['id'] = fid
+        return d
+
     def fly(self, fid):
-        f = self.c.functions.fly(fid).call()
-        keys = ['connectome', 'model', 'generation', 'deaths', 'parentA', 'parentB', 'stateRoot', 'memoryRoot', 'stateURI', 'brainStep', 'energy', 'bornBlock', 'lastCommitBlock', 'body', 'pendingBody', 'alive']
-        d = dict(zip(keys, f)); d['connectome'] = d['connectome'].hex(); d['stateRoot'] = d['stateRoot'].hex(); d['memoryRoot'] = d['memoryRoot'].hex(); d['id'] = fid
+        d = self._fly_dict(fid, self.c.functions.fly(fid).call())
         d['name'] = self.c.functions.flyName(fid).call(); d['owner'] = self.c.functions.ownerOf(fid).call()
         return d
+
+    def flies(self, ids):
+        """The records of many flies (without name/owner), batched 50 per round trip; one call each where the provider refuses batches."""
+        ids = list(ids); out = []
+        for k in range(0, len(ids), 50):
+            chunk = ids[k:k + 50]
+            try:
+                with self.w3.batch_requests() as batch:
+                    for i in chunk: batch.add(self.c.functions.fly(i))
+                    rows = batch.execute()
+            except Exception:
+                rows = [self.c.functions.fly(i).call() for i in chunk]
+            out += [self._fly_dict(i, r) for i, r in zip(chunk, rows)]
+        return out
+
+    def body(self, addr):
+        """The registered body record: {name, uri, registeredBlock, flies} ('' name when never registered)."""
+        b = self.c.functions.bodies(Web3.to_checksum_address(addr)).call(); return {'name': b[0], 'uri': b[1], 'registeredBlock': b[2], 'flies': b[3]}
 
     def total(self): return self.c.functions.totalMinted().call()
 

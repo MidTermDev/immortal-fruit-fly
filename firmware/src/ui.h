@@ -5,8 +5,9 @@
 #include "pebble.h"
 
 void uiInit();
-// one frame from copies of the shared state; returns the wedge under a finger on the ring (or -1) for the senses
-int uiFrame(const BodyState& s, const RingData& r, bool wifi, bool hostingRing);
+// one frame from copies of the shared state; returns the wedge under a finger on the ring (or -1) for the senses.
+// `life` draws the Life view (the brain host's stream in h) instead of the Compass (the on-chain core ring).
+int uiFrame(const BodyState& s, const RingData& r, const HostView& h, bool wifi, bool hostingRing, bool life);
 // full-screen modal pages
 void uiBootMessage(const char* line1, const char* line2 = nullptr);
 void uiShowKey(const std::string& privHex, const char* addr);   // blocks until a button is pressed

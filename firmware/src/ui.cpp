@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include "qrcode.h"
 #include "ethtx.h"
+#include "hostframe.h"
 
 // ---- layout (320×240)
 static const int CX = 104, CY = 110;       // ring centre
@@ -12,6 +13,8 @@ static const int R_IN = 52, R_OUT = 86;    // activity ring
 static const int H_IN = 89, H_OUT = 95;    // heading-histogram ring (the memory)
 static const int PX = 200, PW = 116;       // right panel
 static const int NARR_Y = 214;             // narration line
+static const int WX = 4, WY = 6, WS = 192; // the Life view's world panel (square, top-down)
+static const int LX = 204, LW = 112;       // the Life view's right column
 
 static M5Canvas frame(&M5.Display);
 static M5Canvas glyph(&frame);
@@ -143,6 +146,7 @@ static void drawRing(const RingData& r, const BodyState& s, bool live) {
     char b[3]; snprintf(b, sizeof b, "%d", w);
     text(CX + (int)(cosf(a) * 102), CY - (int)(sinf(a) * 102), b, C_DIM, &fonts::Font0, textdatum_t::middle_center);
   }
+  text(4, 4, "on-chain", C_MAG);   // these neurons run in the EVM (the whole brain is on the host, Life view)
   if (!live) return;
   // the on-chain population vector (last anchor), magenta, thin
   if (s.anchored && (s.chainHeadX || s.chainHeadY)) {
@@ -241,18 +245,160 @@ static void drawPanel(const BodyState& s, const RingData& r, bool wifi) {
   y = 190;
   if (s.candidate) { text(PX, y, "B: confirm hand-off", C_AMBER); text(PX, y + 10, "A/C: cancel", C_DIM); }
   else if (s.scanning) { text(PX, y, "scanning BLE...", C_BLUE); }
-  else if (s.phase == Phase::HOST) { text(PX, y, "hold B: hand off", C_DIM); text(PX, y + 10, "hold A+C: show key", C_DIM); }
+  else if (s.phase == Phase::HOST) { text(PX, y, "B: life  hold B: hand off", C_DIM); text(PX, y + 10, "hold A+C: show key", C_DIM); }
   else if ((s.phase == Phase::WAIT || s.phase == Phase::DEAD) && s.flyTokens) { text(PX, y, s.hatchArmed ? "B again: HATCH" : "B: hatch a fly", s.hatchArmed ? C_AMBER : C_DIM); text(PX, y + 10, "hold A+C: show key", C_DIM); }
   else { text(PX, y, "hold A+C: show key", C_DIM); }
 }
 
-int uiFrame(const BodyState& s, const RingData& r, bool wifi, bool hostingRing) {
+// ---- the Life view: the brain host's stream (brain/HOST_PROTOCOL.md "What the pebble shows")
+
+// soft glows: nested discs drawn dim to bright, all outer layers before any inner one so overlaps stay soft
+struct Glow { int x, y; float radius; int r, g, b; float a; };
+static void drawGlows(const Glow* gs, int n) {
+  static const float ring[3] = {1.f, 0.62f, 0.32f}, lum[3] = {0.10f, 0.22f, 0.45f};
+  for (int layer = 0; layer < 3; ++layer)
+    for (int i = 0; i < n; ++i) {
+      float rad = gs[i].radius < 2 ? 2 : gs[i].radius;
+      frame.fillCircle(gs[i].x, gs[i].y, (int)(rad * ring[layer]), mix(gs[i].r, gs[i].g, gs[i].b, lum[layer] * gs[i].a));
+    }
+}
+
+// the biggest font that fits the column for one word
+static const lgfx::IFont* fitFont(const char* word, int w) {
+  static const lgfx::IFont* fonts_[] = {&fonts::FreeSansBold12pt7b, &fonts::FreeSansBold9pt7b, &fonts::Font2, &fonts::Font0};
+  for (const lgfx::IFont* f : fonts_) { frame.setFont(f); if (frame.textWidth(word) <= w) return f; }
+  return &fonts::Font0;
+}
+
+static void fmtHms(int64_t e, char* out, size_t n) {
+  if (e < 0) e = 0;
+  if (e >= 3600) snprintf(out, n, "%lldh %02lldm %02llds", (long long)(e / 3600), (long long)((e % 3600) / 60), (long long)(e % 60));
+  else if (e >= 60) snprintf(out, n, "%lldm %02llds", (long long)(e / 60), (long long)(e % 60));
+  else snprintf(out, n, "%lld s", (long long)e);
+}
+
+static void drawWorld(const HostView& h) {
+  const hostframe::LiteFrame& f = h.frame;
+  const float scale = (float)WS / f.arena;
+  auto sx = [&](float x) { return WX + (int)((x + f.arena * 0.5f) * scale + 0.5f); };
+  auto sy = [&](float y) { return WY + (int)((f.arena * 0.5f - y) * scale + 0.5f); };
+  frame.fillRect(WX, WY, WS, WS, rgb(12, 14, 20));
+  frame.setClipRect(WX, WY, WS, WS);
+  // puffs of odor (fainter), food with its plume, the predator's halo
+  Glow gs[hostframe::MAX_PUFFS + hostframe::MAX_FOOD + 1]; int ng = 0;
+  for (int i = 0; i < f.npuffs; ++i) gs[ng++] = {sx(f.puffs[i].x), sy(f.puffs[i].y), 9 + 9 * f.puffs[i].strength, 150, 120, 230, 0.5f + 0.5f * f.puffs[i].strength};
+  for (int i = 0; i < f.nfood; ++i) {
+    float left = f.food[i].energy0 > 0 ? f.food[i].energy / f.food[i].energy0 : 1.f;
+    if (left < 0.15f) left = 0.15f;
+    if (left > 1) left = 1;
+    gs[ng++] = {sx(f.food[i].x), sy(f.food[i].y), 8 + 12 * left, 80, 220, 120, 1.f};
+  }
+  int pr = 3;
+  if (f.predator.present) {
+    pr = (int)(f.predator.size * scale * 0.5f); if (pr < 3) pr = 3;
+    gs[ng++] = {sx(f.predator.x), sy(f.predator.y), pr * 2.5f, 88, 196, 245, 0.8f};
+  }
+  drawGlows(gs, ng);
+  for (int i = 0; i < f.nfood; ++i) frame.fillCircle(sx(f.food[i].x), sy(f.food[i].y), 2, C_GREEN);
+  // the trail, oldest dimmest
+  if (h.trailN > 1) {
+    int px = 0, py = 0;
+    for (int i = 0; i < h.trailN; ++i) {
+      int k = (h.trailHead + HOST_TRAIL_LEN - h.trailN + i) % HOST_TRAIL_LEN;
+      int x = sx(h.trailX[k]), y = sy(h.trailY[k]);
+      if (i) { float a = 0.12f + 0.55f * (float)i / (float)h.trailN; frame.drawLine(px, py, x, y, mix(240, 180, 41, a)); }
+      px = x; py = y;
+    }
+  }
+  // the predator: a blue dot
+  if (f.predator.present) frame.fillCircle(sx(f.predator.x), sy(f.predator.y), pr, C_BLUE);
+  // the fly: a red triangle along its heading (world y up, screen y down)
+  {
+    float a = f.heading, c = cosf(a), sn = sinf(a);
+    int x = sx(f.x), y = sy(f.y);
+    int tx = x + (int)(c * 8), ty = y - (int)(sn * 8);
+    int bx = x - (int)(c * 4), by = y + (int)(sn * 4);
+    int lx = bx - (int)(sn * 4), ly = by - (int)(c * 4);
+    int rx = bx + (int)(sn * 4), ry = by + (int)(c * 4);
+    frame.fillTriangle(tx, ty, lx, ly, rx, ry, f.alive ? C_RED : C_DIM);
+  }
+  frame.clearClipRect();
+  frame.drawRect(WX, WY, WS, WS, rgb(64, 68, 84));
+  // where the neurons are
+  char b[48]; snprintf(b, sizeof b, "brain on host %c %.1fx real time", 0xFA, f.realtime);
+  text(WX + 4, WY + WS - 10, b, C_DIM);
+}
+
+static void drawLife(const BodyState& s, const HostView& h, bool wifi) {
+  const hostframe::LiteFrame& f = h.frame;
+  drawWorld(h);
+  // the newest diary line under the world
+  textFit(WX, WY + WS + 3, h.diary[0] ? h.diary : "", WS, C_TXT);
+
+  char b[64];
+  int y = 4;
+  textFit(LX, y, s.flyName[0] ? s.flyName : "Fly", LW, C_TXT, &fonts::Font2); y += 18;
+  snprintf(b, sizeof b, "#%llu  gen %lu", (unsigned long long)s.flyId, (unsigned long)f.generation);
+  text(LX, y, b, C_DIM); y += 12;
+  text(LX, y, f.alive ? "ALIVE" : "DEAD", f.alive ? C_GREEN : C_RED, &fonts::Font2); y += 18;
+  // energy from the frame (the host's clock), full at one hour
+  int64_t e = (int64_t)(f.energy < 0 ? 0 : f.energy);
+  float fill = e >= 3600 ? 1.f : (float)e / 3600.f;
+  frame.drawRect(LX, y, LW, 9, C_DIM);
+  frame.fillRect(LX + 1, y + 1, (int)((LW - 2) * fill), 7, e < 120 ? C_RED : e < 600 ? C_AMBER : C_GREEN);
+  y += 12;
+  fmtHms(e, b, sizeof b); text(LX, y, b, C_TXT); y += 14;
+  // what it is doing, big
+  const char* word = hostframe::modeWord(f.mode);
+  if (!*word) word = f.modeText[0] ? f.modeText : "?";
+  const char* line1 = word; const char* line2 = nullptr;
+  if (f.mode == hostframe::M_SURGE) { line1 = "following"; line2 = "a scent"; }
+  uint16_t wc = f.mode == hostframe::M_FLEE ? C_BLUE : f.mode == hostframe::M_EAT ? C_GREEN : f.mode == hostframe::M_SURGE ? C_AMBER : C_TXT;
+  const lgfx::IFont* bf = fitFont(line1, LW);
+  text(LX, y, line1, wc, bf); y += (bf == &fonts::FreeSansBold12pt7b ? 22 : bf == &fonts::FreeSansBold9pt7b ? 17 : 16);
+  if (line2) { text(LX, y, line2, wc, &fonts::FreeSansBold9pt7b); y += 17; }
+  else y += 4;
+  if (y < 120) y = 120;
+  // the brain lighting up by region
+  struct Bar { const char* name; float v; };
+  float steer = fabsf(f.rates.dna02L - f.rates.dna02R);
+  Bar bars[5] = {{"smell", 1 - expf(-f.rates.alpn / LIFE_SCALE_SMELL)}, {"memory", 1 - expf(-(f.rates.kc + f.rates.mbon) / LIFE_SCALE_MEMORY)},
+                 {"sight", 1 - expf(-(f.rates.lc4L + f.rates.lc4R) / LIFE_SCALE_SIGHT)}, {"steer", 1 - expf(-steer / LIFE_SCALE_STEER)},
+                 {"taste", 1 - expf(-f.rates.grn / LIFE_SCALE_TASTE)}};
+  for (int i = 0; i < 5; ++i) {
+    float v = bars[i].v; if (v < 0) v = 0; if (v > 1) v = 1;
+    text(LX, y, bars[i].name, C_DIM);
+    int bx = LX + 40, bw = LW - 40;
+    frame.drawRect(bx, y + 1, bw, 6, C_GREY);
+    frame.fillRect(bx + 1, y + 2, (int)((bw - 2) * v), 4, mix(240, 180, 41, 0.35f + 0.65f * v));
+    y += 10;
+  }
+  y += 2;
+  snprintf(b, sizeof b, "%lu jumps  %lu hits", (unsigned long)f.jumps, (unsigned long)f.hits);
+  text(LX, y, b, C_DIM); y += 11;
+  drawDots(LX + 4, y + 4, wifi, s.ble);
+  text(LX + 90, y, h.wsMode ? "ws" : "poll", h.connected ? C_GREEN : C_DIM);
+  y += 12;
+  if (s.candidate) { text(LX, y, "B: confirm hand-off", C_AMBER); }
+  else if (s.scanning) { text(LX, y, "scanning BLE...", C_BLUE); }
+  else { text(LX, y, "B: compass  hold B: hand off", C_DIM); }
+}
+
+int uiFrame(const BodyState& s, const RingData& r, const HostView& h, bool wifi, bool hostingRing, bool life) {
   bool flash = millis() < s_flashUntil;
   frame.fillScreen(flash ? rgb(120, 20, 20) : (s.phase == Phase::DEAD ? rgb(28, 28, 30) : C_BG));
 
   int touchWedge = -1;
+  if (s.phase == Phase::HOST && life) {
+    drawLife(s, h, wifi);
+    frame.drawFastHLine(0, NARR_Y - 4, 320, C_GREY);
+    textFit(4, NARR_Y, s.status[0] ? s.status : "", 312, s.txPending ? C_AMBER : C_TXT, &fonts::Font2);
+    frame.pushSprite(0, 0);
+    return -1;
+  }
   if (s.phase == Phase::HOST) {
     drawRing(r, s, hostingRing && s.alive);
+    if (!hostFresh(h, millis()) || h.frame.generation != s.generation) text(4, 16, h.originKnown ? "brain host offline" : "no brain host", rgb(200, 90, 70));
     // a finger on the ring cues the wedge under it (like the site's poke)
     auto t = M5.Touch.getDetail();
     if (t.isPressed() && t.y < 240) {

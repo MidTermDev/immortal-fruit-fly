@@ -38,8 +38,10 @@ function wedgeActivity(cs: CoreState) {
   return { act: bins.map((b) => b / hi), bump: bins.indexOf(hi) };
 }
 
-export default function Core({ id, fly, chain, wallet, connect, toast, names }: {
+export default function Core({ id, fly, chain, wallet, connect, toast, names, hostServes = false }: {
   id: number; fly: FlyRecord; chain: Chain | null; wallet: string | null; connect: () => Promise<void>; toast: (m: string, ms?: number) => void; names: Record<string, string>;
+  /** True when the brain host is running this fly's whole brain for its pebble body (the life figure above this one). */
+  hostServes?: boolean;
 }) {
   const dialRef = useRef<HTMLCanvasElement>(null);
   const [cs, setCs] = useState<CoreState | null>(null);
@@ -137,7 +139,7 @@ export default function Core({ id, fly, chain, wallet, connect, toast, names }: 
     <div id="core" style={{ marginTop: 44 }}>
       <div className="fig-head core-head">
         <div><div className="num">Figure · on-chain core · #{pad(id)}</div><h2>This fly&apos;s own 155 neurons, inside the contract</h2></div>
-        <p className="cap"><b>Fig. |</b> The whole brain above is anchored to the chain by hashes. This part needs no anchoring: the fly&apos;s head-direction ring (EPG, PEG, PEN and Δ7 cells from FlyWire) runs spike by spike inside <code>FlyCore</code>, one 155-neuron state per fly. Its body cues it with what the fly senses, for free; anyone else may poke it by burning $FLY; anyone may tick it for gas. {pebble ? <>Right now its body is <b>{bodyName(fly.body, allNames)}</b>, a <Link href="/docs/pebbles/">pebble</Link>: it runs only this core, and the whole brain sleeps until a whole-brain body takes the fly back.</> : fresh ? "This core has not run yet: every neuron at rest at step 0. The first stimulus or tick starts it." : `Step ${fmt(cs?.step || 0)}, ${fmt(cs?.totalSpikes || 0)} spikes so far.`}</p>
+        <p className="cap"><b>Fig. |</b> The whole brain above is anchored to the chain by hashes. This part needs no anchoring: the fly&apos;s head-direction ring (EPG, PEG, PEN and Δ7 cells from FlyWire) runs spike by spike inside <code>FlyCore</code>, one 155-neuron state per fly. Its body cues it with what the fly senses, for free; anyone else may poke it by burning $FLY; anyone may tick it for gas. {pebble ? (hostServes ? <>Right now its body is <b>{bodyName(fly.body, allNames)}</b>, a <Link href="/docs/pebbles/">pebble</Link>: it runs this core from its own sensors and signs for the fly, while the brain host runs the whole brain above.</> : <>Right now its body is <b>{bodyName(fly.body, allNames)}</b>, a <Link href="/docs/pebbles/">pebble</Link>: it runs only this core, and the whole brain sleeps until the brain host or a whole-brain body takes the fly up.</>) : fresh ? "This core has not run yet: every neuron at rest at step 0. The first stimulus or tick starts it." : `Step ${fmt(cs?.step || 0)}, ${fmt(cs?.totalSpikes || 0)} spikes so far.`}</p>
       </div>
       {err && <div className="banner">{err}</div>}
       <div className="grid2 core-grid">

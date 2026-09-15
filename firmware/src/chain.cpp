@@ -9,6 +9,7 @@
 #include "net.h"
 #include "ble.h"
 #include "replica.h"
+#include "host.h"
 #include "keccak.h"
 #include "../fixtures/params.h"
 
@@ -34,8 +35,18 @@ struct Chain {
   // a commit we sent but saw no receipt for: if the record's brainStep reaches it, it landed and the chain's energy
   // baseline moved to what we sent (feeds are detected against that baseline; see reconcileCommit)
   struct PendingCommit { bool active = false; uint64_t brainStep = 0; int64_t energy = 0; uint32_t sentMs = 0; uint64_t steps = 0; size_t historyLen = 0; } pendingCommit;
+  // the brain host's checkpoint payload whose commit the chain has not accepted yet. Fetching one is destructive on
+  // the host (it pins the snapshot and hands over the interactions since the previous checkpoint, then forgets
+  // them), so it is re-sent as it is until the record's brainStep reaches it, and its interactions go out once it
+  // is known to have landed (a receipt, or reconcileCommit). A send that failed is retried after COMMIT_RETRY_S.
+  hostframe::Held held;
   // death: at most one died() at a time, never blindly re-sent after a revert
   uint32_t lastDieTryMs = 0; uint8_t dieReverts = 0; bool starving = false;
+  // the brain host (brain/HOST_PROTOCOL.md): its origin is bodies(FLY_HOST_ADDR).uri, re-read on a schedule and on
+  // request; the frame's energy is the display counter while frames arrive (plus feeds seen while they do not)
+  uint8_t hostAddr[20]; bool hostOn = false;
+  uint32_t lastOriginMs = 0, lastOriginTryMs = 0;
+  int64_t hostAdj = 0; uint32_t hostFramesSeen = 0;
   // shadow of the chain's core state at the last anchor, replayed locally to check the two kernels agree
   flycore::Core* shadow = nullptr;
   bool haveShadow = false;
@@ -49,12 +60,33 @@ struct Chain {
     ethtx::Bytes t;
     if (ethtx::fromHex(FLY_TOKEN, t) && t.size() == 20) memcpy(token, t.data(), 20); else memset(token, 0, 20);
     coreEnabled = strlen(FLY_CORE) == 42;
+    hostOn = hostConfigured() && ethtx::fromHex(FLY_HOST_ADDR, t) && t.size() == 20;
+    if (hostOn) memcpy(hostAddr, t.data(), 20); else memset(hostAddr, 0, 20);
     void* mem = heap_caps_malloc(sizeof(flycore::Core), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!mem) mem = malloc(sizeof(flycore::Core));
     if (mem) shadow = new (mem) flycore::Core(g_circuit, PARAMS_V2);
   }
 
-  int64_t energyNow() const { return chainEnergy - (int64_t)((millis() - energyEpochMs) / 1000); }
+  // The seconds of life to show and to commit: the newest of the chain's baseline (last commit/accept plus feeds)
+  // and the host's frame (which knows about food the fly ate), each drained by the seconds since. Feeds seen while
+  // no frame arrives are added on top of the frame's value (hostAdj) until the next frame carries them.
+  // A frame counts only for the life the chain knows: after a resurrection the host may still stream the previous
+  // generation's death for a while (its process lives 10 minutes past a death), which must not be believed.
+  bool frameCurrent() const { return g_host.haveFrame && g_host.frame.generation == fly.generation; }   // g_hostMutex held
+  int64_t hostEnergy(bool& valid) {
+    Lock l(g_hostMutex);
+    if (!frameCurrent()) { valid = false; return 0; }
+    if (g_host.frames != hostFramesSeen) { hostFramesSeen = g_host.frames; hostAdj = 0; }
+    valid = (int32_t)(g_host.frameMs - energyEpochMs) >= 0;
+    return (int64_t)g_host.frame.energy - (int64_t)((millis() - g_host.frameMs) / 1000) + hostAdj;
+  }
+  int64_t energyNow() {
+    bool v; int64_t h = hostEnergy(v);
+    if (v) return h;
+    return chainEnergy - (int64_t)((millis() - energyEpochMs) / 1000);
+  }
+  bool hostFreshNow() { Lock l(g_hostMutex); return frameCurrent() && hostFresh(g_host, millis()); }
+  bool hostSaysDead() { Lock l(g_hostMutex); return frameCurrent() && hostFresh(g_host, millis()) && !g_host.frame.alive; }
   bool isMe(const uint8_t a[20]) const { return memcmp(a, g_wallet.addr, 20) == 0; }
   static bool isZero(const uint8_t a[20]) { for (int i = 0; i < 20; ++i) if (a[i]) return false; return true; }
 
@@ -130,6 +162,27 @@ struct Chain {
     return true;
   }
 
+  // the host's notable events of a committed checkpoint, newest first, as interactions (each ~35k gas; no receipt
+  // wait, nonces run on). Best effort: the commit's historyRoot already attests them
+  void sendHostInteractions(const hostframe::Payload& p) {
+    int n = p.ninteractions < INTERACTIONS_PER_COMMIT ? p.ninteractions : INTERACTIONS_PER_COMMIT;
+    for (int i = 0; i < n; ++i) {
+      uint8_t itx[32];
+      if (!reg.interaction(g_wallet, id, p.interactions[i].kind, p.interactions[i].data, itx)) { setStatus("interaction failed: %s", rpc::lastError()); break; }
+      std::string h = ethtx::toHex(itx, 32);
+      setStatus("%s: %s  tx %.10s", p.interactions[i].kind, p.interactions[i].data, h.c_str());
+      vTaskDelay(pdMS_TO_TICKS(300));
+    }
+  }
+
+  // the held checkpoint landed (its step is on the record): its interactions, then it is no longer needed
+  void heldLanded() {
+    if (!held.active) return;
+    held.active = false;   // done with, whatever the sends below do (nothing re-enters here)
+    sendHostInteractions(held.p);
+    held.clear();
+  }
+
   void drainSenses() {
     SenseEvent e;
     while (xQueueReceive(g_senseQueue, &e, 0) == pdTRUE) {
@@ -140,6 +193,7 @@ struct Chain {
         case Sense::LANDMARK_R: snprintf(b, sizeof b, "landmark on the right (wedge %d, x%d)", e.wedge, e.strength); sendInteraction("landmark", b); break;
         case Sense::LANDMARK_2: snprintf(b, sizeof b, "landmark ahead (wedge %d, x%d)", e.wedge, e.strength); sendInteraction("landmark", b); break;
         case Sense::SHOCK: snprintf(b, sizeof b, "spider! shock x%d, the bump collapsed", e.strength); sendInteraction("shock", b); break;
+        default: break;   // TOUCH is for the host only
       }
     }
   }
@@ -187,7 +241,7 @@ struct Chain {
     haveFly = true; fly = f;
     chainEnergy = (int64_t)f.energy; energyEpochMs = millis();
     coreStepsSinceCommit = 0; history.clear(); haveShadow = false;
-    pendingCommit.active = false; lastDieTryMs = 0; dieReverts = 0; starving = false;
+    pendingCommit.active = false; held.clear(); lastDieTryMs = 0; dieReverts = 0; starving = false;
     lastAnchorMs = millis(); lastCommitMs = millis();
     std::string name; reg.flyName(id, name);
     {
@@ -201,17 +255,33 @@ struct Chain {
     { Lock l(g_replicaMutex); g_replica->reset(); }
     if (coreEnabled) syncReplica(0, false, CH_NONE, 0, 0, 0); else { Lock l(g_stateMutex); g_state.anchored = false; }
     replicaSetHosting(true);
+    hostAdj = 0; hostFramesSeen = 0;
     setPhase(Phase::HOST);
+    if (hostOn) resolveHostOrigin(true);
     if (fresh) {
-      char b[80]; snprintf(b, sizeof b, "woke up in %s (core only, %llu s of life)", g_state.bodyName, (unsigned long long)f.energy);
+      char b[80]; snprintf(b, sizeof b, "woke up in %s (%llu s of life)", g_state.bodyName, (unsigned long long)f.energy);
       sendInteraction("pebble", b);
     } else setStatus("hosting %s again", name.c_str());
+  }
+
+  // ---- the brain host's origin: bodies(FLY_HOST_ADDR).uri, every HOST_ORIGIN_REFRESH_S, when the host task asks
+  //      (its connection failed) and when hosting starts; never more often than HOST_ORIGIN_RETRY_S
+  void resolveHostOrigin(bool force) {
+    if (!hostOn) return;
+    uint32_t now = millis();
+    if (!force && lastOriginTryMs && now - lastOriginTryMs < HOST_ORIGIN_RETRY_S * 1000UL) return;
+    lastOriginTryMs = now;
+    std::string name, uri;
+    if (!reg.body(hostAddr, name, uri)) { Serial.printf("[chain] bodies(host) failed: %s\n", rpc::lastError()); return; }
+    lastOriginMs = now;
+    hostSetOrigin(uri);
+    if (uri.empty()) setStatus("brain host not registered yet (compass core only)");
   }
 
   void stopHosting(const char* why) {
     replicaSetHosting(false);
     haveFly = false;
-    pendingCommit.active = false; lastDieTryMs = 0; dieReverts = 0; starving = false;
+    pendingCommit.active = false; held.clear(); lastDieTryMs = 0; dieReverts = 0; starving = false;
     nvsRemove("flyid");
     { Lock l(g_stateMutex); g_state.flyId = 0; g_state.flyName[0] = 0; g_state.anchored = false; g_state.candidate = false; g_state.scanning = false; }
     id = 0;
@@ -243,6 +313,7 @@ struct Chain {
     pendingCommit.active = false;
     { Lock l(g_stateMutex); g_state.brainStep = f.brainStep; }
     Serial.printf("[chain] the commit at step %llu landed after all (receipt missed)\n", (unsigned long long)f.brainStep);
+    if (held.active && !held.pending(f.brainStep)) heldLanded();   // the host's checkpoint: its interactions are still owed
   }
 
   // ---- feeds: the chain's energy is above the baseline we expect (our last commit or accept, plus feeds seen)
@@ -251,6 +322,7 @@ struct Chain {
     if ((int64_t)f.energy > expected) {
       int64_t fed = (int64_t)f.energy - expected;
       chainEnergy += fed;
+      if (!hostFreshNow()) hostAdj += fed;   // the host drops the feed as food when it is back; count it meanwhile
       g_sound = SND_CHIRP;
       std::string by = fedBy();
       char b[80];
@@ -311,6 +383,7 @@ struct Chain {
     uint8_t h[32];
     { Lock l(g_replicaMutex); g_replica->stateHash(h); }
     replicaSetHosting(false);
+    held.clear();   // a checkpoint of the life that just ended cannot be committed any more (Dead)
     g_sound = SND_DEATH;
     { Lock l(g_stateMutex); g_state.alive = false; g_state.energy = 0; memcpy(g_state.brainHash, h, 32); g_state.deadBlock = (uint32_t)block; if (brainStep) g_state.brainStep = brainStep; }
     setPhase(Phase::DEAD);
@@ -393,64 +466,108 @@ struct Chain {
     }
   }
 
-  // ---- commit: whole-brain roots and uri unchanged, brainStep advanced by the core steps, energy by real seconds
+  // ---- commit. With the brain host reachable: GET /checkpoint (signed) and commit exactly its payload, then
+  //      interaction() for up to INTERACTIONS_PER_COMMIT of its notable events, newest first. Without it: the
+  //      core-only payload (whole-brain roots and uri unchanged, brainStep advanced by the core steps, energy by
+  //      real seconds). A host payload is fetched once: it is held until the chain has it (see `held`) and re-sent
+  //      as it is, with its energy drained by the seconds since the fetch, when the send failed or the receipt was
+  //      missed and the record shows it did not land. Only then is a new checkpoint asked for.
+  bool commitRetryDue() const { return held.active && !pendingCommit.active; }
   void commit() {
     lastCommitMs = millis();
     if (!id || !haveFly) return;
     // the energy we commit overwrites the chain's: read the record first so a feed since the last poll is in it
+    // (and a held commit whose receipt was missed is recognised by the record's brainStep: reconcileCommit)
     if (!refreshRecord()) { setStatus("commit postponed: %s", rpc::lastError()); return; }
     if (g_state.phase != Phase::HOST || !haveFly) return;   // dead or moved meanwhile
+    hostframe::Payload p; bool viaHost = false;
+    if (held.active) {
+      if (held.pending(fly.brainStep)) {
+        p = held.p; viaHost = true;
+        setStatus("re-sending the held checkpoint (step %llu, attempt %u)", (unsigned long long)p.brainStep, (unsigned)held.sends + 1);
+      } else heldLanded();   // it is on the record after all (a receipt we missed): only its interactions were owed
+    }
+    if (!viaHost && hostOn && hostReady()) {
+      setStatus("asking the brain host for a checkpoint...");
+      if (hostCheckpoint(id, p)) {
+        if (p.brainStep > fly.brainStep) { viaHost = true; held.take(p, millis()); }
+        else setStatus("host checkpoint at step %llu is not past the chain's %llu: core-only commit", (unsigned long long)p.brainStep, (unsigned long long)fly.brainStep);
+      } else setStatus("brain host checkpoint failed (%s): core-only commit", hostLastError());
+    }
     uint64_t steps = coreStepsSinceCommit ? coreStepsSinceCommit : 1;
-    uint64_t brainStep = fly.brainStep + steps;
-    int64_t e = energyNow(); if (e < 0) e = 0;
+    uint64_t brainStep = viaHost ? p.brainStep : fly.brainStep + steps;
+    int64_t e = viaHost ? (int64_t)held.energyAt(millis()) : energyNow(); if (e < 0) e = 0;
     size_t historyLen = history.size();
-    uint8_t root[32]; keccak256((const uint8_t*)history.data(), historyLen, root);
+    uint8_t root[32];
+    if (viaHost) memcpy(root, p.historyRoot, 32); else keccak256((const uint8_t*)history.data(), historyLen, root);
     uint8_t tx[32];
     uint32_t sentMs = millis();
-    if (!reg.commit(g_wallet, id, fly.stateRoot, fly.memoryRoot, fly.stateURI, "", brainStep, (uint64_t)e, root, tx)) { setStatus("commit failed: %s", rpc::lastError()); return; }
+    if (viaHost) held.sends++;
+    bool sent = viaHost ? reg.commit(g_wallet, id, p.stateRoot, p.memoryRoot, p.stateURI, p.metadataURI, brainStep, (uint64_t)e, root, tx)
+                        : reg.commit(g_wallet, id, fly.stateRoot, fly.memoryRoot, fly.stateURI, "", brainStep, (uint64_t)e, root, tx);
+    if (!sent) {   // nothing reached the chain: the held payload is re-sent in COMMIT_RETRY_S (loop: commitRetryDue)
+      setStatus("commit failed: %s%s", rpc::lastError(), viaHost ? " (the checkpoint is kept; retrying)" : "");
+      return;
+    }
     uint64_t block = 0;
-    int r = waitReceipt(tx, "committing", &block);
-    if (r < 0) {   // unseen: it may still land; reconcileCommit notices by the record's brainStep
+    int r = waitReceipt(tx, viaHost ? "committing the host's checkpoint" : "committing (core only)", &block);
+    if (r < 0) {   // unseen: it may still land; reconcileCommit notices by the record's brainStep (and sends the held interactions)
       pendingCommit.active = true; pendingCommit.brainStep = brainStep; pendingCommit.energy = e; pendingCommit.sentMs = sentMs;
       pendingCommit.steps = coreStepsSinceCommit; pendingCommit.historyLen = historyLen;
       return;
     }
-    if (r != 1) return;   // reverted: nothing changed on the chain; the next poll explains it (moved, dead)
+    if (r != 1) {   // reverted: nothing changed on the chain; the next poll explains it (moved, dead, or an earlier send of the same payload landed)
+      if (viaHost && ++held.reverts >= COMMIT_HOLD_MAX_REVERTS) { held.clear(); setStatus("the held checkpoint reverted %u times: dropped", (unsigned)COMMIT_HOLD_MAX_REVERTS); }
+      return;
+    }
     pendingCommit.active = false;
     fly.brainStep = brainStep;
+    if (viaHost) { memcpy(fly.stateRoot, p.stateRoot, 32); memcpy(fly.memoryRoot, p.memoryRoot, 32); fly.stateURI = p.stateURI; }
     chainEnergy = e; energyEpochMs = sentMs;
     coreStepsSinceCommit = 0; history.clear();
     { Lock l(g_stateMutex); g_state.brainStep = brainStep; }
-    setStatus("committed at block %llu: step %llu, %lld s of life", (unsigned long long)block, (unsigned long long)brainStep, (long long)e);
+    setStatus("committed at block %llu: step %llu, %lld s of life%s", (unsigned long long)block, (unsigned long long)brainStep, (long long)e, viaHost ? " (whole brain)" : " (core only)");
+    if (viaHost) heldLanded();
   }
 
-  // ---- death. The local counter reached 0. died() does not check energy on the chain (FlyRegistry.died only checks
-  //      body and alive), so the pebble must not send it on a stale picture: the record is re-read first, and a feed
-  //      that landed since the last poll (or while Wi-Fi was down) brings the fly back instead. A died() of ours that
-  //      mined without us seeing the receipt shows up as alive == false and ends in DEAD without another tx; a fly the
-  //      owner moved shows up as body != me and ends in WAIT. A revert (NotBody/Dead: the read was from a lagging
-  //      node) is followed by an immediate poll, a longer wait and at most DIE_MAX_REVERTS attempts in total.
-  //      Returns true while the fly is still ours, alive on the chain and at 0 (anchors and commits pause).
-  bool starve() {
+  // ---- death. Two ways in: a fresh frame from the brain host says alive == false (the fly starved in its world;
+  //      GET /final gives the payload and the cause), or the local counter reached 0 (the host-offline case, or
+  //      just before the host's own verdict). died() does not check energy on the chain (FlyRegistry.died only
+  //      checks body and alive), so the pebble must not send it on a stale picture: the record is re-read first,
+  //      and a feed that landed since the last poll (or while Wi-Fi was down) brings the fly back instead. A died()
+  //      of ours that mined without us seeing the receipt shows up as alive == false and ends in DEAD without
+  //      another tx; a fly the owner moved shows up as body != me and ends in WAIT. A revert (NotBody/Dead: the read
+  //      was from a lagging node) is followed by an immediate poll, a longer wait and at most DIE_MAX_REVERTS
+  //      attempts in total. Returns true while the fly is still ours, alive on the chain and dying (anchors and
+  //      commits pause).
+  bool starve(bool hostDead) {
     if (!id || !haveFly) return false;
-    if (!starving) { starving = true; setStatus("%s is out of energy: checking the registry before reporting", g_state.flyName); }
+    if (!starving) { starving = true; setStatus("%s %s: checking the registry before reporting", g_state.flyName, hostDead ? "died in its world" : "is out of energy"); }
     uint32_t wait = (uint32_t)DIE_RETRY_S * 1000UL << (dieReverts < 4 ? dieReverts : 4);
     if (lastDieTryMs && millis() - lastDieTryMs < wait) return true;
     lastDieTryMs = millis();
-    if (!refreshRecord()) { setStatus("starving, but the registry is unreachable: %s", rpc::lastError()); return true; }
+    if (!refreshRecord()) { setStatus("dying, but the registry is unreachable: %s", rpc::lastError()); return true; }
     if (g_state.phase != Phase::HOST || !haveFly) return false;   // dead on-chain (DEAD) or moved (WAIT): nothing to send
-    if (energyNow() > 0) { starving = false; dieReverts = 0; setStatus("fed in time: %lld s of life", (long long)energyNow()); return false; }
+    if (!hostDead && energyNow() > 0) { starving = false; dieReverts = 0; setStatus("fed in time: %lld s of life", (long long)energyNow()); return false; }
     if (dieReverts >= DIE_MAX_REVERTS) {   // keep reading the record on the backed-off schedule; send nothing
       setStatus("died() reverted %u times while the registry says alive: not retrying (check BscScan)", (unsigned)dieReverts);
       return true;
     }
-    uint64_t steps = coreStepsSinceCommit ? coreStepsSinceCommit : 1;
-    uint64_t brainStep = fly.brainStep + steps;
+    // the host's final payload when it has one; 409 means the fly is alive in its world (our counter was early)
+    hostframe::Payload p; int hf = -1;
+    if (hostOn && hostReady()) hf = hostFinal(id, p);
+    if (hf == 1 && p.generation != fly.generation) { setStatus("host /final is for generation %lu, the chain says %lu: ignored", (unsigned long)p.generation, (unsigned long)fly.generation); hf = -1; }
+    if (hf == 0) { setStatus("the brain host says %s is still alive: waiting for its verdict", g_state.flyName); lastDieTryMs = millis() - wait + 5000; return true; }
+    if (hf < 0 && hostDead) { setStatus("host says dead but /final failed (%s): retrying", hostLastError()); return true; }
+    uint64_t brainStep = hf == 1 ? p.brainStep : fly.brainStep + (coreStepsSinceCommit ? coreStepsSinceCommit : 1);
     char cause[64]; snprintf(cause, sizeof cause, "starved in %s", g_state.bodyName);
+    std::string causeStr = hf == 1 && !p.cause.empty() ? p.cause : std::string(cause);
     uint8_t tx[32];
-    if (!reg.died(g_wallet, id, fly.stateRoot, fly.memoryRoot, fly.stateURI, "", brainStep, cause, tx)) { setStatus("died() failed: %s", rpc::lastError()); return true; }
+    bool sent = hf == 1 ? reg.died(g_wallet, id, p.stateRoot, p.memoryRoot, p.stateURI, p.metadataURI, brainStep, causeStr, tx)
+                        : reg.died(g_wallet, id, fly.stateRoot, fly.memoryRoot, fly.stateURI, "", brainStep, causeStr, tx);
+    if (!sent) { setStatus("died() failed: %s", rpc::lastError()); return true; }
     uint64_t block = 0;
-    int r = waitReceipt(tx, "reporting death", &block);
+    int r = waitReceipt(tx, hf == 1 ? "reporting death (host payload)" : "reporting death", &block);
     if (r == 1) { finishDeath(block, brainStep); return false; }
     if (r == 0) { dieReverts++; lastPollMs = 0; }   // NotBody or Dead: the record has the answer; poll now, no blind resend
     // r < 0: no receipt in RECEIPT_WAIT_S. It may still mine: the next attempt re-reads the record first and follows
@@ -577,14 +694,19 @@ struct Chain {
       Phase ph = g_state.phase;
       if (ph == Phase::HOST) {
         drainSenses();
-        // out of energy: reconcile with the chain and report the death (starve()); anchors and commits pause while
-        // that is pending, but the poll below keeps running so feeds, hand-offs and a death already on the chain
-        // are seen (a fed fly leaves this branch on its own)
-        bool paused = energyNow() <= 0 ? starve() : false;
+        // the brain host's origin: on a schedule, and when the host task lost the stream
+        if (hostOn && (hostWantsOrigin() || now - lastOriginMs >= HOST_ORIGIN_REFRESH_S * 1000UL || !lastOriginMs)) resolveHostOrigin(false);
+        // dead in its world (a fresh frame says so) or out of energy: reconcile with the chain and report the death
+        // (starve()); anchors and commits pause while that is pending, but the poll below keeps running so feeds,
+        // hand-offs and a death already on the chain are seen (a fed fly leaves this branch on its own)
+        bool hostDead = hostSaysDead();
+        bool paused = hostDead || energyNow() <= 0 ? starve(hostDead) : false;
         if (!paused && g_state.phase == Phase::HOST) {
           if (energyNow() > 0) { starving = false; dieReverts = 0; }
           if (coreEnabled && now - lastAnchorMs >= ANCHOR_EVERY_S * 1000UL) anchor();
-          if (g_state.phase == Phase::HOST && now - lastCommitMs >= COMMIT_EVERY_S * 1000UL) commit();
+          // every COMMIT_EVERY_S; a held host checkpoint whose send failed is retried after COMMIT_RETRY_S (never
+          // early while a sent commit still awaits its receipt: a second send would race it)
+          if (g_state.phase == Phase::HOST && hostframe::commitDue(now, lastCommitMs, COMMIT_EVERY_S * 1000UL, commitRetryDue(), COMMIT_RETRY_S * 1000UL)) commit();
         }
       }
       if (now - lastPollMs >= POLL_EVERY_S * 1000UL || lastPollMs == 0) poll();

@@ -31,6 +31,7 @@ class World:
         self.energy = energy; self.alive = True; self.generation = 0
         self.age_ms = 0.0; self.life_ms = 0.0
         self.food = []; self.next_food_id = 1
+        self.puffs = []        # transient odor sources with nothing to eat: {x, y, strength, expires_ms}
         self.predator = None; self.next_predator_ms = 40_000.0
         self.lamp = (ARENA * 0.4, ARENA * 0.4)
         self.path = [(0.0, 0.0)]
@@ -73,12 +74,28 @@ class World:
         self.food.append(f); self.log(f'food placed at ({x:.0f},{y:.0f}) worth {energy:.0f}s' + (f' by {by[:8]}' if by else ''))
         return f
 
+    def puff(self, x, y, strength=1.0, seconds=8.0):
+        """A transient plume with no food in it (a pebble's landmark or cue): smells like food of amplitude `strength` (1 = a fresh item) for `seconds`, then fades out at once."""
+        p = {'x': float(x), 'y': float(y), 'strength': float(strength), 'expires_ms': self.age_ms + float(seconds) * 1000.0}
+        self.puffs.append(p); self.log(f'a whiff of something at ({x:.0f},{y:.0f})')
+        return p
+
+    def spawn_predator(self, angle):
+        """A predator appears 0.7·ARENA away in that absolute direction, approaching now. Ignored (False) while one is already about."""
+        if self.predator: return False
+        r = ARENA * 0.7; px, py = self.x + r * math.cos(angle), self.y + r * math.sin(angle); sp = 25.0
+        self.predator = {'x': px, 'y': py, 'vx': -sp * math.cos(angle), 'vy': -sp * math.sin(angle), 'size': 6.0}
+        self.log('a shadow approaches'); return True
+
     def odor_at(self, px, py):
         c = 0.0
         for f in self.food:
             d2 = (f['x'] - px) ** 2 + (f['y'] - py) ** 2
             frac = f['energy'] / max(1.0, f['energy0'])
             c += (0.3 + 0.7 * frac) * math.exp(-d2 / (2 * PLUME_SIGMA ** 2))
+        for p in self.puffs:
+            d2 = (p['x'] - px) ** 2 + (p['y'] - py) ** 2
+            c += p['strength'] * math.exp(-d2 / (2 * PLUME_SIGMA ** 2))
         return min(1.0, c)
 
     # ------------------------------------------------------------ senses
@@ -179,6 +196,7 @@ class World:
             if on_food['energy'] <= 0.05: self.food.remove(on_food); self.log(f'finished a food item worth {on_food["energy0"]:.0f}s', 'ate')
         # predator
         self.age_ms += WORLD_MS; self.life_ms += WORLD_MS
+        if self.puffs: self.puffs = [p for p in self.puffs if p['expires_ms'] > self.age_ms]
         if self.predator:
             p = self.predator; p['x'] += p['vx'] * dt; p['y'] += p['vy'] * dt
             if math.hypot(p['x'] - self.x, p['y'] - self.y) < 2.5:
@@ -186,10 +204,7 @@ class World:
             elif math.hypot(p['x'], p['y']) > ARENA:
                 self.predator = None; self.next_predator_ms = self.age_ms + 45_000 + self.rng.random() * 60_000
         elif self.age_ms >= self.next_predator_ms:
-            ang = self.rng.random() * 2 * math.pi; r = ARENA * 0.7
-            px, py = self.x + r * math.cos(ang), self.y + r * math.sin(ang); sp = 25.0
-            self.predator = {'x': px, 'y': py, 'vx': -sp * math.cos(ang), 'vy': -sp * math.sin(ang), 'size': 6.0}
-            self.log('a shadow approaches')
+            self.spawn_predator(self.rng.random() * 2 * math.pi)
         # metabolism
         self.energy -= dt
         if self.energy <= 0:
@@ -208,7 +223,7 @@ class World:
         d = {k: getattr(self, k) for k in self.DYN}
         d['_last_jump'] = getattr(self, '_last_jump', -1e9)
         d['rates'] = dict(self.rates); d['slow'] = dict(self.slow); d['base'] = dict(self.base)
-        d['food'] = [dict(f) for f in self.food]; d['predator'] = None if not self.predator else dict(self.predator)
+        d['food'] = [dict(f) for f in self.food]; d['predator'] = None if not self.predator else dict(self.predator); d['puffs'] = [dict(p) for p in self.puffs]
         d['path'] = self.path[-600:]; d['events'] = self.events[-50:]
         d['rng'] = self.rng.bit_generator.state
         return d
@@ -219,7 +234,7 @@ class World:
         self._last_jump = d.get('_last_jump', -1e9)
         for k in ('rates', 'slow', 'base'):
             if k in d: getattr(self, k).update(d[k])
-        self.food = [dict(f) for f in d.get('food', [])]; self.predator = None if not d.get('predator') else dict(d['predator'])
+        self.food = [dict(f) for f in d.get('food', [])]; self.predator = None if not d.get('predator') else dict(d['predator']); self.puffs = [dict(p) for p in d.get('puffs', [])]
         for f in self.food:   # food placed outside the walls by an earlier version is unreachable; pull it inside
             f['x'] = max(-self.FOOD_LIM, min(self.FOOD_LIM, float(f['x']))); f['y'] = max(-self.FOOD_LIM, min(self.FOOD_LIM, float(f['y'])))
         self.path = [tuple(p) for p in d.get('path', [(self.x, self.y)])] or [(self.x, self.y)]; self.events = [tuple(e) for e in d.get('events', [])]
@@ -231,6 +246,7 @@ class World:
                 'life_ms': self.life_ms, 'spikes_total': self.b.total_spikes, 'ate': self.ate_total, 'jumps': self.jumps, 'hits': self.hits,
                 'food': [{'id': f['id'], 'x': f['x'], 'y': f['y'], 'energy': f['energy'], 'energy0': f['energy0'], 'by': f['by']} for f in self.food],
                 'predator': None if not self.predator else {'x': self.predator['x'], 'y': self.predator['y'], 'size': self.predator['size']},
+                'puffs': [{'x': p['x'], 'y': p['y'], 'strength': p['strength'], 'expires_ms': p['expires_ms']} for p in self.puffs],
                 'lamp': self.lamp, 'arena': ARENA, 'rates': {k: round(v, 2) for k, v in R.items()}, 'base': {k: round(v, 2) for k, v in self.base.items()}, 'steer': round(self.steer, 2), 'mode': self.mode, 'orn': [round(self.orn_rates[0], 1), round(self.orn_rates[1], 1)], 'events': self.events[-12:]}
 
 

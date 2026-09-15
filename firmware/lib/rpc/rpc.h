@@ -35,6 +35,7 @@ struct Registry {
   bool ownerOf(uint64_t id, uint8_t out[20]);
   bool totalMinted(uint64_t& out);
   bool isBody(const uint8_t who[20], bool& out);
+  bool body(const uint8_t who[20], std::string& name, std::string& uri, uint64_t* registeredBlock = nullptr, uint32_t* flies = nullptr);   // bodies(addr): the brain host's origin lives in uri
   // writes (signed by the pebble)
   bool registerBody(Wallet& w, const std::string& name, const std::string& uri, uint8_t tx[32]);
   bool accept(Wallet& w, uint64_t id, uint8_t tx[32]);
