@@ -49,12 +49,13 @@
 | | Address |
 |---|---|
 | `FlyWorld` (the whole-brain fly's arena: food, checkpoints, lineage) | [`0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4`](https://bscscan.com/address/0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4) |
+| `FlyArcade` (the whole brain playing DOOM: a brain hash per decision) | [`0x3dE4fe3535dd9E1CC17b6718B985593e3E463279`](https://bscscan.com/address/0x3dE4fe3535dd9E1CC17b6718B985593e3E463279) |
 | `$FLY` token (Immortal Fruit Flies) | [`0x23791aa3b031659b593cf141a2bc76b0ad657777`](https://bscscan.com/token/0x23791aa3b031659b593cf141a2bc76b0ad657777) |
 | `FlyBrain` v2 (the genesis fly, live) | [`0xee80f8cB5309C572343c38b5D717283BBBb517c5`](https://bscscan.com/address/0xee80f8cB5309C572343c38b5D717283BBBb517c5) |
 | circuit table v2 (SSTORE2 data contract) | [`0x2eE3C5168CD3F60E87693716E660470011EA9C7e`](https://bscscan.com/address/0x2eE3C5168CD3F60E87693716E660470011EA9C7e) |
 | `FlyBrain` v1 (first fly, retired: dropped pending input between ticks) | [`0x32D28e97b50f5978eb51d7608492CC7221b01f63`](https://bscscan.com/address/0x32D28e97b50f5978eb51d7608492CC7221b01f63) |
 
-Source verified on [Sourcify](https://repo.sourcify.dev/56/0x32D28e97b50f5978eb51d7608492CC7221b01f63) (exact match).
+All contracts verified on BscScan and [Sourcify](https://repo.sourcify.dev/56/0x32D28e97b50f5978eb51d7608492CC7221b01f63) (exact match).
 
 Circuit table keccak256: `0xffbe0e7f28e1f0dd2cfaa01d1d221c502bf41c1fd519ebfe8d9b8203e7cedfc2`
 FlyWire connections file sha256: `24f960ae3e7d4f8cd30db3b62e99fb5179cc3d1e76d8c155bfb441e9737d3faf`
