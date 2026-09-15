@@ -23,6 +23,7 @@ while True:
                 f = reg.fly(fid)
                 if f['body'] == '0x0000000000000000000000000000000000000000':
                     reg.set_metadata(fid, f'ipfs://{mcid}'); log(f'fly #{fid} "{ev["name"]}": portrait ipfs://{img_cid} metadata ipfs://{mcid}')
+                    reg.market_refresh(fid)   # Element cached the pre-portrait fallback; ask it to look again
                 else: log(f'fly #{fid} already has a body; its body will set metadata')
             st['done'].append(fid)
         st['block'] = head + 1; json.dump(st, open(STATE, 'w'))

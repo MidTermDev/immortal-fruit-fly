@@ -162,6 +162,7 @@ def post_checkpoint():
         rc = reg.commit(FLY_ID, h, MEMORY_ROOT, uri, muri, step, int(snap['energy']), hr)
         chain_state['last_checkpoint'] = time.time(); chain_state['checkpoints'] += 1; chain_state['last_tx'] = rc['transactionHash'].hex(); chain_state['last_hash'] = h; chain_state['last_uri'] = uri
         log(f"commit {h[:12]} {uri} tx {chain_state['last_tx']} ({len(ints)} interactions)")
+        reg.market_refresh(FLY_ID)
     except Exception as e:
         log('commit failed:', str(e)[:200])
 
@@ -187,7 +188,7 @@ def report_death():
                 if not chain_state.get('portrait'): chain_state['portrait'] = reg.portrait_uri(FLY_ID)
                 muri, _ = reg.pin_metadata(FLY_ID, chain_state.get('portrait', ''), {'Age (s)': int(snap['t_ms'] / 1000), 'Spikes': snap['spikes_total'], 'Eaten (s)': int(snap['ate']), 'Jumps': snap['jumps'], 'Cause of death': 'starved in the arena'}, body_name='none',
                                            state={'stateRoot': h, 'stateURI': uri, 'brainStep': step, 'energy': 0, 'alive': False, 'deaths': int(f['deaths']) + 1})
-            rc = reg.died(FLY_ID, h, MEMORY_ROOT, uri, muri, step, 'starved in the arena'); log(f"death reported {h[:12]} tx {rc['transactionHash'].hex()}")
+            rc = reg.died(FLY_ID, h, MEMORY_ROOT, uri, muri, step, 'starved in the arena'); log(f"death reported {h[:12]} tx {rc['transactionHash'].hex()}"); reg.market_refresh(FLY_ID)
         except Exception as e:
             log('death report failed, retrying in 20 s:', str(e)[:160]); time.sleep(20)
 

@@ -127,6 +127,12 @@ class Registry:
             with urllib.request.urlopen(req, timeout=30) as r: return json.load(r).get('image', '')
         except Exception: return ''
 
+    def market_refresh(self, *fids):
+        """Ask the marketplace (Element) to re-read these tokens' metadata. Best effort, detached, never raises."""
+        try:
+            subprocess.Popen(['node', os.path.join(HERE, 'market_refresh.mjs'), *[str(f) for f in fids]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except Exception: pass
+
     def pin_metadata(self, fid, image_uri, extra=None, body_name=None, state=None):
         meta = self.metadata(fid, image_uri, extra, body_name, state)
         return f"ipfs://{self.pinata.pin_json(meta, f'fly-{fid}.json')}", meta
