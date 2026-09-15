@@ -69,6 +69,7 @@ class FlyBrain:
         self.stimChannel = CH_NONE; self.stimParam = 0; self.stimStrength = 0; self.stimUntil = 0
         self.totalSpikes = 0
         self.log = []  # per-step (spikes, epg spikes by wedge)
+        self.record_ids = False; self.spike_lists = []  # optional per-step spiking neuron ids
 
     # ------------------------------------------------------------ actions
     def stimulate(self, channel, param, strength):
@@ -133,6 +134,7 @@ class FlyBrain:
                     self.inp[post] += tdiv(w * g, 16)
                 if c.type[i] <= T_EPGT and c.wedge[i] != 255: stepbins[c.wedge[i]] += 1
             self.log.append((len(spikeList), stepbins))
+            if self.record_ids: self.spike_lists.append(list(spikeList))
             ran += 1; self.energy -= 1
         # plasticity
         for i in range(N):

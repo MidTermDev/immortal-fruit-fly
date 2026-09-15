@@ -8,10 +8,11 @@ export default function Page() {
   return (
     <DocsShell current="/docs/contracts/">
       <h1>Contracts &amp; addresses</h1>
-      <p className="lede">Everything is on BNB Smart Chain (chain ID 56). Sources are verified on Sourcify as exact matches.</p>
+      <p className="lede">Everything is on BNB Smart Chain (chain ID 56). Sources are verified on BscScan and on Sourcify as exact matches.</p>
       <table className="data"><thead><tr><th>Contract</th><th>Address</th></tr></thead><tbody>
         <tr><td><code>$FLY</code> token (Immortal Fruit Flies)</td><td><a href={`${ex}/token/${CFG.token}`}>{CFG.token}</a></td></tr>
         <tr><td><code>FlyWorld</code>, the whole-brain fly&apos;s arena (food, checkpoints, lineage)</td><td><a href={`${ex}/address/${CFG.world}`}>{CFG.world}</a> · <a href={CFG.links.sourcify + CFG.world}>source</a></td></tr>
+        <tr><td><code>FlyArcade</code>, the log of the whole brain playing games (brain hash per decision)</td><td><a href={`${ex}/address/${CFG.arcade}`}>{CFG.arcade}</a></td></tr>
         <tr><td><code>FlyBrain</code> v2, the on-chain compass core (live)</td><td><a href={`${ex}/address/${CFG.brain}`}>{CFG.brain}</a> · <a href={CFG.links.sourcify + CFG.brain}>source</a></td></tr>
         <tr><td>Circuit table v2 (SSTORE2 data contract)</td><td><a href={`${ex}/address/${CFG.circuitPtr}`}>{CFG.circuitPtr}</a></td></tr>
         <tr><td><code>FlyBrain</code> v1 (first fly, retired)</td><td><a href={`${ex}/address/${CFG.brainV1}`}>{CFG.brainV1}</a> · <a href={CFG.links.sourcify + CFG.brainV1}>source</a></td></tr>

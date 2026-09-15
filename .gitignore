@@ -40,3 +40,6 @@ brain/*.pid
 brain/public_url.txt
 brain/__pycache__/
 web/public/assets/brain_points_v2.bin.tmp
+brain/doom_run/
+brain/doom_test/
+brain/doom*.log
