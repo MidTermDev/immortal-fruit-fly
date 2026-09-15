@@ -29,9 +29,16 @@ NetConfig netConfig() {
   return c;
 }
 
+static std::string g_ssid, g_pass;
+
 bool netConnect(const NetConfig& c, uint32_t timeoutMs) {
   if (c.ssid.empty()) return false;
+  g_ssid = c.ssid; g_pass = c.pass;
+  WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  // Modem sleep is the classic cause of "connected, then dropped every few minutes" on the ESP32, and it is worse
+  // with BLE sharing the radio. The pebble is on USB or a 500 mAh cell for a demo; keep the radio awake.
+  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
   WiFi.begin(c.ssid.c_str(), c.pass.c_str());
   uint32_t t0 = millis();
@@ -42,9 +49,17 @@ bool netConnect(const NetConfig& c, uint32_t timeoutMs) {
 bool netConnected() { return WiFi.status() == WL_CONNECTED; }
 
 void netReconnect() {
-  static uint32_t last = 0;
+  static uint32_t last = 0; static int attempts = 0;
   if (millis() - last < 10000) return;
-  last = millis();
+  last = millis(); attempts++;
+  if (attempts % 3 == 0 && !g_ssid.empty()) {
+    // three soft reconnects failed: tear the association down and start over (DHCP, auth), which also clears a
+    // stuck state after the router rebooted or handed us a new channel
+    Serial.printf("[net] reconnect attempt %d: full restart of the station\n", attempts);
+    WiFi.disconnect(true, false); delay(200); WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.begin(g_ssid.c_str(), g_pass.c_str());
+    return;
+  }
+  Serial.printf("[net] reconnect attempt %d (rssi last %d)\n", attempts, WiFi.RSSI());
   WiFi.reconnect();
 }
 
