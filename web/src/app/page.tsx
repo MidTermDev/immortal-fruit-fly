@@ -1,12 +1,13 @@
 import Fly from "@/components/Fly";
-import { CircuitSection, TokenSection, ProvenanceSection, VisionTeaser } from "@/components/Static";
+import { CircuitSection, ImmortalitySection, VisionSection, TokenSection, ProvenanceSection } from "@/components/Static";
 
 export default function Home() {
   return (
     <main>
       <Fly />
       <CircuitSection />
-      <VisionTeaser />
+      <ImmortalitySection />
+      <VisionSection />
       <TokenSection />
       <ProvenanceSection />
     </main>

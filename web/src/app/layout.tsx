@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Syne, Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { Bricolage_Grotesque, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { CFG } from "@/lib/config";
 
-const display = Syne({ subsets: ["latin"], weight: ["700", "800"], variable: "--font-display", display: "swap" });
+const display = Bricolage_Grotesque({ subsets: ["latin"], weight: ["600", "700", "800"], variable: "--font-display", display: "swap" });
 const body = Instrument_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body", display: "swap" });
 const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "700"], variable: "--font-mono", display: "swap" });
 
@@ -22,18 +22,25 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <header className="topbar">
           <div className="wrap">
-            <Link className="brand" href="/"><span className="glyph">(@@)</span> IMMORTAL FRUIT FLY</Link>
-            <nav className="nav"><Link href="/#play">Play</Link><Link href="/#brain">Brain</Link><Link href="/docs/">Docs</Link><Link href="/docs/vision/">Vision</Link><Link href="/docs/roadmap/">Roadmap</Link></nav>
+            <Link className="brand" href="/"><span className="glyph">(@@)</span> Immortal Fruit Fly</Link>
+            <nav className="nav">
+              <Link href="/#monitor">Monitor</Link><Link href="/#brain">Circuit</Link><Link href="/docs/vision/">Vision</Link><Link href="/docs/roadmap/">Roadmap</Link><Link href="/docs/">Docs</Link>
+            </nav>
             <span className="spacer" />
-            <a className="btn small ghost" href={CFG.links.github} target="_blank" rel="noopener">GitHub</a>
-            <a className="btn small gold" href={CFG.links.pancake + CFG.token} target="_blank" rel="noopener">Buy $FLY</a>
+            <a className="btn sm quiet" href={CFG.links.github} target="_blank" rel="noopener">GitHub</a>
+            <a className="btn sm amber" href={CFG.links.pancake + CFG.token} target="_blank" rel="noopener">Buy $FLY</a>
           </div>
         </header>
         {children}
         <footer>
           <div className="wrap">
-            <div>Immortal Fruit Fly · not financial advice · it is a fly</div>
-            <div className="links"><a href={CFG.links.x} target="_blank" rel="noopener">X</a><a href={CFG.links.telegram} target="_blank" rel="noopener">Telegram</a><a href={CFG.links.github} target="_blank" rel="noopener">GitHub</a><a href={`${CFG.explorer}/address/${CFG.brain}`} target="_blank" rel="noopener">FlyBrain on BscScan</a></div>
+            <div>Immortal Fruit Fly · FlyWire 783 · BNB Smart Chain · not financial advice, it is a fly</div>
+            <div className="links">
+              <a href={CFG.links.x} target="_blank" rel="noopener">X</a>
+              <a href={CFG.links.telegram} target="_blank" rel="noopener">Telegram</a>
+              <a href={CFG.links.github} target="_blank" rel="noopener">GitHub</a>
+              <a href={`${CFG.explorer}/address/${CFG.brain}`} target="_blank" rel="noopener">Contract</a>
+            </div>
           </div>
         </footer>
       </body>

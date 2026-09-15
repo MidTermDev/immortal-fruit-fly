@@ -2,7 +2,7 @@
 
 *Draft v0.1, 2026-09-15. Sections marked ⏳ are being filled from research in progress.*
 
-## 0. Where we are (Genesis, live today)
+## 0. Where we are — Genesis, live
 
 - **Brain:** 155 real neurons of the FlyWire head-direction circuit (EPG, EPGt, PEG, PEN_a, PEN_b, Δ7), 6,522 connections / 45,961 synapses, simulated as integer leaky-integrate-and-fire neurons inside `FlyBrain` v2 at `0xee80f8cB5309C572343c38b5D717283BBBb517c5` on BNB Smart Chain.
 - **Body:** a position and heading in a 2-D world, moved by the compass bump.
@@ -22,34 +22,34 @@
 
 ## 2. Phases
 
-### Phase 1 — Alive (now → weeks)
+### Phase 1 — Alive
 Goal: the genesis fly is continuously alive, visibly, without a human in the loop.
 - Keeper economics: whoever ticks earns a slice of what the fly eats (`tick` bounty from a keeper pool funded by feeds), so the brain never stops because a bot died.
 - Sensory world v1: the fly gets *senses from the chain*. Block hashes become olfactory noise; large `$FLY` transfers become "food smell" that pulls the compass toward the feeder's wedge; big sells become a looming shadow (Δ7 shock). The fly reacts to the market.
 - Live feed: the site streams every spike as it happens (replay from events), a public "EEG".
 - Fly cam: a 24/7 rendered stream (brain + compass + walk) for X / Telegram.
 
-### Phase 2 — Reflexes (1–2 months)
+### Phase 2 — Reflexes
 Goal: add the two circuits every fly-brain demo uses, so the fly can *react*.
 - **Giant fiber escape circuit** (looming → jump). ⏳ neuron counts / synapses from research.
 - **Descending steering** (PFL3 → DNa02 left/right) so the compass actually steers a body rather than a population vector.
 - Multi-circuit brains: several SSTORE2 circuit tables chained in one contract; a tick runs all of them.
 - Body v2: an on-chain arena with food, walls and predators; the fly's walk is a game everyone can watch and influence.
 
-### Phase 3 — Learning (2–4 months)
+### Phase 3 — Learning
 Goal: the fly *learns* on-chain. Not a metaphor: dopamine-gated plasticity from the connectome.
 - **Mushroom body compartment** (Kenyon cells → MBON, gated by PAM/PPL1 dopamine neurons). ⏳ minimal compartment from research.
 - Reward = being fed; punishment = shock. The fly learns which on-chain "smells" (stimulus channels) predict food and steers toward them. Weights live in storage; anyone can audit what it learned.
 - Memory export: a life's learned weights are the resurrectable soul; lineage entries carry them.
 
-### Phase 4 — The colony (3–6 months)
+### Phase 4 — The colony
 Goal: from one organism to a species.
 - `FlyFactory`: anyone mints a fly (an ERC-721 whose token is a live brain contract), same circuit, its own life.
 - Shared world: flies see each other (mutual looming), compete for food, can be fed by fans.
 - **Breeding:** two dead flies' engrams are crossed (per-neuron crossover + mutation) into a child's initial memory. Selection pressure = who gets fed. Evolution on-chain, with the connectome fixed and memory heritable.
 - Leaderboards: oldest fly, most spikes, longest walk, most generations.
 
-### Phase 5 — The whole brain (6–12 months)
+### Phase 5 — The whole brain
 Goal: the full 139k / 166k-neuron connectome, verifiably.
 - Off-chain full-brain simulation (MaleCNS v1.0, 166,700 neurons) in the standard LIF recipe every demo uses; state checkpoints (Merkle roots of membrane potentials) posted on-chain every N steps.
 - **Verification ladder:** optimistic (anyone can dispute a checkpoint by replaying a window on-chain with the same integer model) → ZK proofs of simulation windows once proving is cheap enough.

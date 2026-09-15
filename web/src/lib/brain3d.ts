@@ -23,9 +23,10 @@ export function decodePoints(buf: ArrayBuffer) {
 }
 
 export class Brain3D {
-  canvas; renderer; scene; camera; group; bg; ring; ringGlow; rotY = 0.2; rotX = 0.35; targetRotY = 0.2; targetRotX = 0.35; auto = true; zoom = 1; reduced = false; onResize; disposed = false; yOffset = 0.06; camY = -0.16;
-  constructor(canvas: HTMLCanvasElement, points: ArrayBuffer, ringNeurons: any[], opts: { camY?: number; yOffset?: number } = {}) {
+  canvas; renderer; scene; camera; group; bg; ring; ringGlow; rotY = 0.22; rotX = 0.16; targetRotY = 0.22; targetRotX = 0.16; auto = true; zoom = 1; reduced = false; onResize; disposed = false; yOffset = 0.06; camY = -0.16; dist = 1.25; sway = false; t = 0;
+  constructor(canvas: HTMLCanvasElement, points: ArrayBuffer, ringNeurons: any[], opts: { camY?: number; yOffset?: number; dist?: number; sway?: boolean } = {}) {
     this.canvas = canvas; if (opts.camY !== undefined) this.camY = opts.camY; if (opts.yOffset !== undefined) this.yOffset = opts.yOffset;
+    if (opts.dist !== undefined) this.dist = opts.dist; if (opts.sway) this.sway = true;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.scene = new THREE.Scene(); this.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 100);
@@ -58,10 +59,12 @@ export class Brain3D {
   spike(spikes: number[]) { for (const i of spikes) this.ringGlow[i] = 1.0; }
   frame(dt: number) {
     if (this.disposed) return;
-    if (this.auto && !this.reduced) this.targetRotY += dt * 0.08;
+    this.t += dt;
+    // a slow sway keeps the brain frontal and recognisable instead of spinning edge-on
+    if (this.auto && !this.reduced) { if (this.sway) { this.targetRotY = 0.26 * Math.sin(this.t * 0.16); this.targetRotX = 0.15 + 0.07 * Math.sin(this.t * 0.11); } else this.targetRotY += dt * 0.08; }
     this.rotY += (this.targetRotY - this.rotY) * 0.08; this.rotX += (this.targetRotX - this.rotX) * 0.08;
     this.group.rotation.set(this.rotX, this.rotY, 0); this.group.position.set(0, this.yOffset, 0);
-    const dist = 1.25 / this.zoom; this.camera.position.set(0, this.camY, dist); this.camera.lookAt(0, this.camY, 0);
+    const dist = this.dist / this.zoom; this.camera.position.set(0, this.camY, dist); this.camera.lookAt(0, this.camY, 0);
     const g = this.ringGlow, decay = Math.exp(-dt * 4.5); for (let i = 0; i < g.length; i++) g[i] *= decay;
     this.ring.geometry.attributes.aGlow.needsUpdate = true;
     this.renderer.render(this.scene, this.camera);

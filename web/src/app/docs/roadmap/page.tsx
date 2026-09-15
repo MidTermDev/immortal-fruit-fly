@@ -13,14 +13,14 @@ export default function Page() {
       <div className="phase done"><span className="k">genesis · live</span><h3>The compass</h3>
         <p>155 neurons (EPG, EPGt, PEG, PEN_a, PEN_b, Δ7), 6,522 connections. Energy, death, resurrection, lineage, engram, walking. Keeper ticking every two minutes. Website with a bit-exact local replica.</p></div>
 
-      <div className="phase"><span className="k">phase 1 · weeks</span><h3>Alive without us</h3>
+      <div className="phase"><span className="k">phase 1</span><h3>Alive without us</h3>
         <ul>
           <li><strong>Keeper economy.</strong> A share of every feed goes to a keeper pool; whoever calls <code>tick()</code> is paid from it. The brain never stops because one bot died.</li>
           <li><strong>Senses from the chain.</strong> Large <code>$FLY</code> transfers become a food smell that pulls the compass toward the sender&apos;s wedge; large sells become a looming shadow (Δ7 shock). The fly reacts to its own market.</li>
           <li><strong>Public EEG.</strong> Every spike streamed from the events, a 24/7 render for X and Telegram.</li>
         </ul></div>
 
-      <div className="phase"><span className="k">phase 2 · 1–2 months</span><h3>Reflexes: the escape circuit and steering</h3>
+      <div className="phase"><span className="k">phase 2</span><h3>Reflexes: the escape circuit and steering</h3>
         <p>The two circuits every fly-brain demo actually uses, added to the same contract shape.</p>
         <ul>
           <li><strong>Giant fiber (DNp01) loom-escape.</strong> LC4 (55 cells, 2,442 synapses onto GF) and LPLC2 (108 cells, 1,366 synapses) looming detectors converge on the giant fiber, which drives the jump motor neuron TTMn and, via PSI, the flight muscles. Roughly 190–250 neurons, a few hundred edges: one table. The gap junctions GF→TTMn/PSI are invisible to EM and will be hard-coded as forward-only edges (Phelan 2008). Input: a loom is a stimulus channel; output: one GF spike and its latency. Prior art: von Reyn 2017, Ache 2019, Dombrovski 2023, and the c3s-reflex-circuits project which compiled this reflex to 173 NAND gates.</li>
@@ -28,14 +28,14 @@ export default function Page() {
           <li><strong>Arena.</strong> An on-chain world with food, walls and predators. The fly&apos;s walk becomes a game anyone can watch and influence.</li>
         </ul></div>
 
-      <div className="phase"><span className="k">phase 3 · 2–4 months</span><h3>Learning</h3>
+      <div className="phase"><span className="k">phase 3</span><h3>Learning</h3>
         <ul>
           <li><strong>A mushroom-body compartment.</strong> A subsampled set of Kenyon cells, one MBON, and the PAM/PPL1 dopamine neurons that gate KC→MBON depression (Aso 2014, Hige 2015, Li 2020). The same mechanism the DOOM and Stonkfly projects pulse; on-chain, the weights are storage and anyone can audit what was learned.</li>
           <li><strong>Reward is food, punishment is shock.</strong> Feeding pulses the reward dopamine neurons, shocks pulse the aversive ones. The fly learns which stimulus channels predict food and steers toward them.</li>
           <li><strong>Heritable memory.</strong> Learned weights travel with the engram through death and resurrection.</li>
         </ul></div>
 
-      <div className="phase"><span className="k">phase 4 · 3–6 months</span><h3>The colony</h3>
+      <div className="phase"><span className="k">phase 4</span><h3>The colony</h3>
         <ul>
           <li><strong>FlyFactory.</strong> Mint a fly: an NFT whose token is a live brain contract. Same circuit, its own life, its own caretakers.</li>
           <li><strong>Shared world.</strong> Flies see each other (mutual looming), compete for food, get fed by fans.</li>
@@ -43,7 +43,7 @@ export default function Page() {
           <li>Leaderboards: oldest, most spikes, longest walk, most generations.</li>
         </ul></div>
 
-      <div className="phase"><span className="k">phase 5 · 6–12 months</span><h3>The whole brain</h3>
+      <div className="phase"><span className="k">phase 5</span><h3>The whole brain</h3>
         <ul>
           <li><strong>Full connectome off-chain, verifiable on-chain.</strong> MaleCNS v1.0 (166,700 neurons, 25.6M directed connections) in the standard Shiu-style LIF recipe, integer-exact, with Merkle roots of the membrane state posted every N steps.</li>
           <li><strong>Verification ladder.</strong> Optimistic first: anyone can dispute a checkpoint by replaying one window on-chain with the same integer model. Then ZK proofs of windows once proving is cheap enough.</li>

@@ -17,6 +17,6 @@ export const CFG = {
     dexscreener: "https://dexscreener.com/bsc/",
     sourcify: "https://repo.sourcify.dev/56/",
   },
-  previewStepsPerSecond: 10,
+  previewStepsPerSecond: 14,
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || "",
 };
