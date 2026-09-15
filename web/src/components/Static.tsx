@@ -127,7 +127,7 @@ export function TokenSection() {
       <div className="wrap">
         <div className="sec-t">
           <div><div className="num">$FLY</div><h2>A token because the animal needs a metabolism</h2></div>
-          <p>$FLY is an ordinary BEP-20 with no tax, no owner and no mint. It has exactly one use: it is destroyed to buy the animal time. Feeding, stimulating and resurrecting all send it to the dead address, where it can never move again, and each of those burns is stored against the address that paid it. Supply only falls, and it falls in proportion to how much anyone cares.</p>
+          <p>$FLY is a BEP-20 with a 1% transfer tax, no owner and no mint. Its purpose is to be destroyed to buy the animal time. Feeding, stimulating and resurrecting all send it to the dead address, where it can never move again, and each of those burns is stored against the address that paid it. Supply only falls, and it falls in proportion to how much anyone cares.</p>
         </div>
         <div className="cols3">
           <div>
@@ -143,7 +143,7 @@ export function TokenSection() {
             <table className="data" style={{ fontSize: 13 }}><tbody>
               <tr><td>Supply</td><td className="num mono">1,000,000,000</td></tr>
               <tr><td>Decimals</td><td className="num mono">18</td></tr>
-              <tr><td>Tax</td><td className="num mono">0%</td></tr>
+              <tr><td>Tax</td><td className="num mono">1% on transfers</td></tr>
               <tr><td>Owner</td><td className="num mono">renounced</td></tr>
             </tbody></table>
           </div>

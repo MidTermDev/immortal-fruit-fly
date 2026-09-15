@@ -18,7 +18,7 @@ export default function Page() {
       </tbody></table>
       <div className="callout"><b>v1 → v2.</b> The first fly dropped pending synaptic input at the end of each tick, so a bump could not survive between ticks. v2 keeps it in storage, has a Yul inner loop (about 2.3× cheaper), and parameters calibrated across several trajectories. v1 stays on-chain as the first organism; its lineage is a fossil.</div>
       <h2>$FLY</h2>
-      <p>A BEP-20 with 1,000,000,000 supply and 18 decimals; ownership renounced; EIP-2612 permit. It has no burn function, so the fly “burns” by transferring to <code>0x000000000000000000000000000000000000dEaD</code>. <code>FlyBrain.totalBurned()</code> counts what the fly has eaten.</p>
+      <p>A BEP-20 with 1,000,000,000 supply, 18 decimals and a 1% transfer tax; ownership renounced; EIP-2612 permit. It has no burn function, so the fly “burns” by transferring to <code>0x000000000000000000000000000000000000dEaD</code>. <code>FlyBrain.totalBurned()</code> counts what the fly has eaten.</p>
       <h2>FlyBrain interface</h2>
       <pre><code>{`function tick(uint16 steps) external;                       // anyone, gas only
 function feed(uint256 amount) external;                     // burns $FLY, +energy

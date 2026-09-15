@@ -23,6 +23,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      - run: rm -rf src/app/api   # the RPC proxy route needs a server; the static export uses public RPCs
+        working-directory: web
       - run: npm run build
         working-directory: web
         env:

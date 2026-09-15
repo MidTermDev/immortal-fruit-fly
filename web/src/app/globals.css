@@ -251,3 +251,12 @@ section.sec { padding-block: clamp(44px, 6vw, 76px); border-bottom: 1px solid va
   .lrow .who { grid-column: 2; }
   .b-raster { min-height: 250px; }
 }
+
+/* ── live whole-brain additions ─────────────────────────────── */
+.b-arena { min-height: 420px; }
+.dnbar { display: grid; grid-template-columns: 96px 1fr 34px; align-items: center; gap: 10px; font-size: 11px; }
+.dnbar .lbl { color: var(--fig-dim); letter-spacing: 0.06em; font-size: 9.5px; }
+.dnbar .track { height: 6px; background: rgba(232,230,224,0.08); position: relative; }
+.dnbar .track i { position: absolute; inset: 0 auto 0 0; transition: width 0.12s linear; }
+.dnbar .mono { color: var(--fig-ink); text-align: right; font-size: 11px; }
+.core-head { padding: 26px 0 8px; border-top: 1px solid var(--ink); }

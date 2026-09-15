@@ -7,7 +7,6 @@ import params from "@/data/params.json";
 import { CFG } from "@/lib/config";
 import { Circuit, FlySim, CH, COS16, SIN16, WEDGES } from "@/lib/flysim";
 import { Chain } from "@/lib/chain";
-import { Brain3D } from "@/lib/brain3d";
 
 const fmt = (n: number | bigint) => Number(n).toLocaleString("en-US");
 const short = (a?: string | null) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "—");
@@ -21,7 +20,6 @@ const RASTER_W = 200;
 const FIG = { epg: "#f0b429", peg: "#d9922a", pen: "#ff5a35", d7: "#58c4f5" };
 
 export default function Fly() {
-  const brainRef = useRef<HTMLCanvasElement>(null);
   const rasterRef = useRef<HTMLCanvasElement>(null);
   const dialRef = useRef<HTMLCanvasElement>(null);
   const walkRef = useRef<HTMLCanvasElement>(null);
@@ -61,11 +59,10 @@ export default function Fly() {
     const row = new Array(circuit.N).fill(0); order.forEach((n, i) => (row[n] = i));
     const ends = [0, 0, 0, 0]; order.forEach((n, i) => (ends[grp(n)] = i));
 
-    let brain: Brain3D | null = null, raf = 0, running = true;
+    let raf = 0, running = true;
     const pushTrail = () => { const x = sim.posX / 256, y = sim.posY / 256, t = trailRef.current, l = t[t.length - 1]; if (!l || l[0] !== x || l[1] !== y) { t.push([x, y]); if (t.length > 4000) t.shift(); } };
 
     sim.onStep = (spikes) => {
-      if (brain) brain.spike(spikes);
       raster.current.push(spikes.map((i) => row[i] * 8 + grp(i)));
       if (raster.current.length > RASTER_W) raster.current.shift();
       let hx = 0, hy = 0;
@@ -184,7 +181,6 @@ export default function Fly() {
       if (n) { const c = raster.current[raster.current.length - 1]; rateBuf.push(c ? c.length : 0); if (rateBuf.length > 40) rateBuf.shift(); }
       const dec = Math.exp(-dt * 3); for (let w = 0; w < WEDGES; w++) wedgeAct.current[w] *= dec;
       head.current.m *= Math.exp(-dt * 0.5);
-      if (brain) brain.frame(dt);
       drawRaster(); drawDial(); drawWalk(); if (n) render();
       raf = requestAnimationFrame(loop);
     };
@@ -210,8 +206,6 @@ export default function Fly() {
     (window as any).__fly = { sim, syncChain, pushTrail, render };
 
     (async () => {
-      try { const buf = await (await fetch(`${CFG.basePath}/assets/brain_points.bin`)).arrayBuffer(); if (brainRef.current) brain = new Brain3D(brainRef.current, buf, (circuitData as any).neurons, { camY: 0, yOffset: 0.02, dist: 1.5, sway: true }); }
-      catch (e) { console.warn("WebGL unavailable", e); }
       if (CFG.brain) {
         try { const ch = await new Chain().connectRead(); chainRef.current = ch; const s = await ch.readState(); modeRef.current = "chain"; applyChain(s); setPrices(ch.prices); loadEvents().catch(() => {}); (window as any).__flyInt = setInterval(syncChain, 5000); }
         catch (e) { console.warn("chain unreachable, preview", e); modeRef.current = "preview"; }
@@ -220,7 +214,7 @@ export default function Fly() {
       for (let i = 0; i < RASTER_W && sim.alive; i++) stepOnce();
       render(); raf = requestAnimationFrame(loop);
     })();
-    return () => { running = false; cancelAnimationFrame(raf); clearInterval((window as any).__flyInt); if (brain) brain.dispose(); };
+    return () => { running = false; cancelAnimationFrame(raf); clearInterval((window as any).__flyInt); };
   }, []);
 
   const act = async (kind: string, fn: () => Promise<any>, preview: () => void) => {
@@ -266,48 +260,12 @@ export default function Fly() {
 
   return (
     <>
-      {/* ── opening statement ─────────────────────────────── */}
-      <section className="open">
+      {/* ── the on-chain core ─────────────────────────────── */}
+      <section className="fig" id="core">
         <div className="wrap">
-          <div>
-            <h1>A fruit fly&apos;s compass circuit, <em>kept alive on a blockchain.</em></h1>
-            <p className="lede">155 neurons of the head-direction ring — the cells a fly uses to know which way it is facing — read out of the FlyWire connectome and rebuilt as spiking neurons inside a smart contract on BNB Smart Chain. It fires, it walks, it remembers where it has been. It also starves. Every simulation step costs it one unit of energy, and only $FLY that somebody burns puts energy back.</p>
-            <div className="acts">
-              <a className="btn fill" href="#care">Feed the specimen</a>
-              <a className="btn" href="#signs">See it firing</a>
-              <a className="btn plain" href="/docs/how-it-works/">How a brain fits in a contract →</a>
-            </div>
-          </div>
-          <aside className="chart">
-            <div className="chart-t"><b>Condition</b><span className="lbl">{ui.mode === "chain" ? `block ${fmt(ui.block)}` : "offline"}</span></div>
-            <div className="gauge" style={{ marginTop: 16, marginBottom: 6 }}>
-              <div className="big">{days !== null ? days.toFixed(1) : "—"}<small>days of life left at the current rate of care</small></div>
-              <div className="bar"><i style={{ width: energyPct + "%" }} /></div>
-              <div className="cap"><span>{compact(ui.energy)} steps of energy</span><span>{care ? `${compact(care.stepsPerDay)} steps/day` : ""}</span></div>
-            </div>
-            <div className="crow"><span>status</span><span><span className={`dot${ui.alive ? "" : " dead"}${ui.mode === "chain" ? "" : " sim"}`} style={{ display: "inline-block", marginRight: 7 }} />{ui.alive ? "alive" : "dead"}</span></div>
-            <div className="crow"><span>generation</span><span>{ui.gen}</span></div>
-            <div className="crow"><span>age</span><span>{fmt(ui.step)} steps</span></div>
-            <div className="crow"><span>spikes fired</span><span>{fmt(ui.spikes)}</span></div>
-            <div className="crow"><span>distance walked</span><span>{Math.hypot(ui.px, ui.py).toFixed(1)} body lengths</span></div>
-            <div className="crow"><span>$FLY consumed</span><span>{ui.burned}</span></div>
-            <div className="crow"><span>kept alive by</span><span>{care ? `${care.ticks} ticks, ${compact(care.stepsPerDay)} steps/day` : "—"}</span></div>
-          </aside>
-        </div>
-      </section>
-
-      {/* ── Figure 1 ──────────────────────────────────────── */}
-      <section className="fig" id="organism">
-        <div className="wrap">
-          <div className="fig-head">
-            <div><div className="num">Figure 1</div><h2>The animal this came from</h2></div>
-            <p className="cap"><b>Fig. 1 |</b> All 139,248 neurons of the adult <i>Drosophila melanogaster</i> brain, reconstructed by FlyWire from electron microscopy. Optic lobes to either side, central brain in the middle. The 155 cells that live on-chain are highlighted, and they flash as they fire. Drag to rotate.</p>
-          </div>
-          <div className="panel p-brain">
-          <span className="panel-note tl">FlyWire release 783 · 44,716 of 139,248 somata shown</span>
-          <span className="panel-note tr">{ui.mode === "chain" ? "on-chain cells firing live" : "local simulation"}</span>
-          <span className="panel-note bl">scale: brain width ≈ 800 µm</span>
-            <canvas ref={brainRef} aria-label="Three-dimensional point cloud of the fruit fly brain with the on-chain neurons highlighted" />
+          <div className="fig-head core-head">
+            <div><div className="num">Specimen 001 · fully on-chain</div><h2>The compass core, inside the contract itself</h2></div>
+            <p className="cap">The whole brain above runs on a server and is anchored to the chain by hashes. This part needs no anchoring: 155 real neurons of the fly&apos;s head-direction ring — the compass it uses to know where it is facing — are simulated spike by spike <em>inside</em> a BNB Smart Chain contract, with every membrane potential in storage. It has its own energy, memory and lineage, and anyone can feed or stimulate it. Age {fmt(ui.step)} steps, energy {fmt(ui.energy)}{days !== null ? `, about ${days.toFixed(1)} days of life at the current rate of care.` : "."}</p>
           </div>
         </div>
       </section>
@@ -316,8 +274,8 @@ export default function Fly() {
       <section className="fig" id="signs">
         <div className="wrap">
           <div className="fig-head">
-            <div><div className="num">Figure 2</div><h2>Vital signs</h2></div>
-            <p className="cap"><b>Fig. 2 |</b> <b>a,</b> Spike raster of all 155 neurons, ordered by role and by position on the ring. A single band of activity — the bump — marks the animal&apos;s current heading; it jumps rows when the heading changes. <b>b,</b> The same activity read as a compass. <b>c,</b> The path the animal has walked, decoded from the bump.</p>
+            <div><div className="num">Figure 3</div><h2>Vital signs of the core</h2></div>
+            <p className="cap"><b>Fig. 3 |</b> <b>a,</b> Spike raster of all 155 on-chain neurons, ordered by role and by position on the ring. A single band of activity — the bump — marks the animal&apos;s current heading; it jumps rows when the heading changes. <b>b,</b> The same activity read as a compass. <b>c,</b> The path the animal has walked, decoded from the bump.</p>
           </div>
           <div className="grid2">
           <div className="cell">
@@ -351,7 +309,7 @@ export default function Fly() {
       <section className="sec care" id="care">
         <div className="wrap">
           <div className="sec-t">
-            <div><div className="num">Husbandry</div><h2>It stays alive because people feed it.</h2></div>
+            <div><div className="num">Husbandry · core</div><h2>The core stays alive because people feed it.</h2></div>
             <p>Nothing about this organism is automatic. Running the brain forward costs gas; keeping it fed costs $FLY, which is destroyed in the act. Anyone may do either, and both are written into the animal&apos;s permanent record along with the address that did it. {days !== null && <>At the rate it is currently being cared for it has about <b>{days.toFixed(0)} days</b> left.</>}</p>
           </div>
           {ui.mode === "preview" && <div className="banner">This page cannot reach BNB Smart Chain from here, so it is running the same circuit locally. Actions below will not touch the live specimen.</div>}
@@ -395,7 +353,7 @@ export default function Fly() {
           </div>
 
           <div style={{ marginTop: 40 }}>
-            <div className="log-head"><b style={{ fontSize: 13 }}>Care record</b><span className="lbl">every interaction, oldest at the bottom</span>{care && <span className="lbl" style={{ marginLeft: "auto" }}>{care.ticks} ticks in the window</span>}</div>
+            <div className="log-head"><b style={{ fontSize: 13 }}>Care record · core</b><span className="lbl">every interaction, oldest at the bottom</span>{care && <span className="lbl" style={{ marginLeft: "auto" }}>{care.ticks} ticks in the window</span>}</div>
             <div className="log-list">
               {events.length ? events.map(evRow) : <div className="lrow"><span className="blk">—</span><span className="act" /><span className="ev">{ui.mode === "chain" ? "no interactions in the last 40,000 blocks" : "reading BNB Smart Chain…"}</span><span /></div>}
             </div>

@@ -71,3 +71,61 @@ export class Brain3D {
   }
   dispose() { this.disposed = true; window.removeEventListener("resize", this.onResize); this.renderer.dispose(); }
 }
+
+
+export function decodePointsV2(buf: ArrayBuffer) {
+  const dv = new DataView(buf); const n = dv.getUint32(0, true);
+  const mn = [dv.getFloat32(4, true), dv.getFloat32(8, true), dv.getFloat32(12, true)], mx = [dv.getFloat32(16, true), dv.getFloat32(20, true), dv.getFloat32(24, true)];
+  const pos = new Float32Array(n * 3), cls = new Uint8Array(n), idx = new Uint32Array(n); let o = 28;
+  for (let i = 0; i < n; i++) { pos[3 * i] = mn[0] + (dv.getUint16(o, true) / 65535) * (mx[0] - mn[0]); pos[3 * i + 1] = mn[1] + (dv.getUint16(o + 2, true) / 65535) * (mx[1] - mn[1]); pos[3 * i + 2] = mn[2] + (dv.getUint16(o + 4, true) / 65535) * (mx[2] - mn[2]); cls[i] = dv.getUint8(o + 6); idx[i] = dv.getUint32(o + 7, true); o += 11; }
+  return { n, pos, cls, idx, mn, mx };
+}
+
+// class palette for the whole brain: optic, sensory, central, CX, MB, descending, motor/endocrine, ascending
+const LIVE_COLORS = [[0.36, 0.44, 0.62], [0.42, 0.72, 0.62], [0.82, 0.70, 0.50], [0.96, 0.72, 0.28], [0.85, 0.45, 0.75], [1.0, 0.36, 0.20], [0.95, 0.5, 0.35], [0.6, 0.6, 0.85]];
+
+/** The whole brain, every rendered soma lit by its own spikes streamed from the simulator. */
+export class BrainLive {
+  canvas; renderer; scene; camera; group; pts; glow; n; rotY = 0.22; rotX = 0.16; targetRotY = 0.22; targetRotX = 0.16; auto = true; zoom = 1; reduced = false; onResize; disposed = false; t = 0; dist = 1.5; yOffset = 0.02;
+  constructor(canvas: HTMLCanvasElement, buf: ArrayBuffer) {
+    this.canvas = canvas;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: "high-performance" });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.scene = new THREE.Scene(); this.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 100);
+    this.group = new THREE.Group(); this.scene.add(this.group);
+    const p = decodePointsV2(buf); this.n = p.n;
+    const cx = (p.mn[0] + p.mx[0]) / 2, cy = (p.mn[1] + p.mx[1]) / 2, cz = (p.mn[2] + p.mx[2]) / 2, scale = 1 / (p.mx[0] - p.mn[0]);
+    const pos = new Float32Array(p.n * 3), col = new Float32Array(p.n * 3), size = new Float32Array(p.n); this.glow = new Float32Array(p.n);
+    for (let i = 0; i < p.n; i++) {
+      pos[3 * i] = (p.pos[3 * i] - cx) * scale; pos[3 * i + 1] = -(p.pos[3 * i + 1] - cy) * scale; pos[3 * i + 2] = (p.pos[3 * i + 2] - cz) * scale;
+      const c = LIVE_COLORS[p.cls[i]] || LIVE_COLORS[2]; const dim = p.cls[i] === 0 ? 0.42 : 0.62;
+      col[3 * i] = c[0] * dim; col[3 * i + 1] = c[1] * dim; col[3 * i + 2] = c[2] * dim; size[i] = p.cls[i] === 0 ? 0.55 : 0.8;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setAttribute("aColor", new THREE.BufferAttribute(col, 3)); g.setAttribute("aSize", new THREE.BufferAttribute(size, 1)); g.setAttribute("aGlow", new THREE.BufferAttribute(this.glow, 1));
+    this.pts = new THREE.Points(g, new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.group.add(this.pts);
+    let drag = null;
+    canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, ry: this.targetRotY, rx: this.targetRotX }; this.auto = false; canvas.setPointerCapture(e.pointerId); });
+    canvas.addEventListener("pointermove", (e) => { if (!drag) return; this.targetRotY = drag.ry + (e.clientX - drag.x) * 0.006; this.targetRotX = Math.max(-1.2, Math.min(1.2, drag.rx + (e.clientY - drag.y) * 0.006)); });
+    canvas.addEventListener("pointerup", () => { drag = null; setTimeout(() => { this.auto = true; }, 4000); });
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); this.zoom = Math.max(0.6, Math.min(2.4, this.zoom * (e.deltaY > 0 ? 0.92 : 1.08))); }, { passive: false });
+    this.resize(); this.onResize = () => this.resize(); window.addEventListener("resize", this.onResize);
+    this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+  resize() { const r = this.canvas.getBoundingClientRect(); const w = Math.max(1, Math.floor(r.width)), h = Math.max(1, Math.floor(r.height)); this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
+  /** indices into the rendered point list that spiked in the last frame */
+  spike(idx: Uint16Array | number[]) { const g = this.glow; for (let k = 0; k < idx.length; k++) { const i = idx[k]; if (i < this.n) g[i] = Math.min(1.0, g[i] + 0.28); } }
+  frame(dt: number) {
+    if (this.disposed) return;
+    this.t += dt;
+    if (this.auto && !this.reduced) { this.targetRotY = 0.26 * Math.sin(this.t * 0.16); this.targetRotX = 0.15 + 0.07 * Math.sin(this.t * 0.11); }
+    this.rotY += (this.targetRotY - this.rotY) * 0.08; this.rotX += (this.targetRotX - this.rotX) * 0.08;
+    this.group.rotation.set(this.rotX, this.rotY, 0); this.group.position.set(0, this.yOffset, 0);
+    const dist = this.dist / this.zoom; this.camera.position.set(0, 0, dist); this.camera.lookAt(0, 0, 0);
+    const g = this.glow, decay = Math.exp(-dt * 2.6); for (let i = 0; i < g.length; i++) g[i] *= decay;
+    (this.pts.geometry.attributes.aGlow as any).needsUpdate = true;
+    this.renderer.render(this.scene, this.camera);
+  }
+  dispose() { this.disposed = true; window.removeEventListener("resize", this.onResize); this.renderer.dispose(); }
+}

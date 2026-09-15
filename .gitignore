@@ -31,3 +31,12 @@ deploy.txt
 *.key
 keeper/keeper.log
 keeper/node_modules/
+brain/rpc.txt
+brain/connectome_783.npz
+brain/state/
+brain/snapshots/
+brain/*.log
+brain/*.pid
+brain/public_url.txt
+brain/__pycache__/
+web/public/assets/brain_points_v2.bin.tmp
