@@ -8,7 +8,7 @@ const NAV = [
 
 export default function DocsShell({ current, children }: { current: string; children: React.ReactNode }) {
   return (
-    <main className="wrap docs">
+    <main id="main" className="wrap docs">
       <nav className="docs-nav" aria-label="Documentation">
         {NAV.map((g) => (<div key={g.h}><p className="eyebrow">{g.h}</p>{g.items.map(([href, label]) => <Link key={href} href={href} className={href === current ? "on" : ""}>{label}</Link>)}</div>))}
       </nav>

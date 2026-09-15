@@ -17,10 +17,10 @@ export default function Page() {
         <tr><td><code>stimulate(SHOCK)</code></td><td>Drives all 42 Δ7 neurons: global inhibition. The bump collapses. The fly stops walking until it recovers.</td><td>100 FLY × strength, burned</td></tr>
         <tr><td><code>resurrect(extraFood)</code></td><td>Only when dead. Wakes the identical brain in a new body at the origin, with <code>extraFood</code> steps of energy. Generation + 1.</td><td>100,000 FLY + food, burned</td></tr>
       </tbody></table>
-      <h2>Reading the compass</h2>
-      <p>The dial on the home page shows the 16 wedges of the ellipsoid body. Bright wedges are where EPG neurons are spiking right now; the needle is the population vector; the faint outer ring is the heading histogram, the fly&apos;s memory of where it has pointed. Click a wedge to aim a cue there.</p>
-      <h2>Preview vs. on-chain</h2>
-      <p>Between on-chain ticks the site runs the same circuit locally from the last on-chain state, so the animation is continuous. The label panel always reports the on-chain figures. When you send an action in preview mode (no wallet, or chain unreachable) it only changes your local copy.</p>
+      <h2>Using the dashboard</h2>
+      <p>Choose a feeding amount, connect your wallet, then confirm the feed. For other interactions, choose an action and review its FLY cost. Expand the strength controls to adjust an interaction or the direction of a landmark. Wallet approval and transaction confirmation appear beside the controls.</p>
+      <h2>Reading the visual</h2>
+      <p>Fly view shows the latest confirmed position and a trail of positions received during this visit. Brain view shows the anatomy and the latest available neural state. Visual transitions smooth those updates; they do not run new simulation steps. If the connection is interrupted, the dashboard keeps the last state visible and pauses paid actions until it reconnects.</p>
       <h2>Gas notes</h2>
       <p>Public BSC RPCs cap gas estimation at 16.7M, so the site sets gas limits itself: 32-step ticks use up to 9M, stimuli with 16 follow-up steps up to 9M. A strong turn stimulus makes many neurons spike and costs more; that is real neural activity you are paying for.</p>
     </DocsShell>

@@ -5,6 +5,7 @@ const isPages = process.env.GITHUB_PAGES === "true";
 const proxy = !isPages && !!process.env.RPC_URL;
 
 const nextConfig: NextConfig = {
+  devIndicators: false,
   output: isPages ? "export" : undefined,
   trailingSlash: true,
   images: { unoptimized: true },
