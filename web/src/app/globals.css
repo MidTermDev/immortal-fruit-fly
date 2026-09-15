@@ -89,7 +89,7 @@ pre code { background: none; padding: 0; }
 .panel-note { position: absolute; z-index: 2; font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fig-dim); }
 .panel-note.tl { top: 12px; left: 14px; } .panel-note.tr { top: 12px; right: 14px; } .panel-note.bl { bottom: 12px; left: 14px; }
 .p-brain { height: clamp(300px, 42vh, 420px); margin-bottom: 30px; }
-.p-brain canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.p-brain canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-y; cursor: grab; }
 .p-brain canvas:active { cursor: grabbing; }
 
 .grid2 { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(0, 1fr); gap: 1px; background: var(--rule); border: 1px solid var(--rule); margin-bottom: 30px; }

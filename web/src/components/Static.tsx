@@ -127,7 +127,7 @@ export function TokenSection() {
       <div className="wrap">
         <div className="sec-t">
           <div><div className="num">$FLY</div><h2>A token because the animal needs a metabolism</h2></div>
-          <p>$FLY is a BEP-20 with a 1% transfer tax, no owner and no mint. Its purpose is to be destroyed to buy the animal time. Feeding, stimulating and resurrecting all send it to the dead address, where it can never move again, and each of those burns is stored against the address that paid it. Supply only falls, and it falls in proportion to how much anyone cares.</p>
+          <p>$FLY is a BEP-20 with a 1% transfer tax, no owner and no mint. Its purpose is to be destroyed to buy the animal time. Feeding, stimulating and resurrecting all send it to the dead address, where it can never move again, and each of those burns is stored against the address that paid it. Circulating supply only falls, and it falls in proportion to how much anyone cares. (The token&apos;s 1% transfer tax applies to those transfers too; figures on this page are the amounts sent.)</p>
         </div>
         <div className="cols3">
           <div>
@@ -149,7 +149,7 @@ export function TokenSection() {
           </div>
           <div>
             <h3 style={{ fontSize: 15, marginBottom: 8 }}>What the contract cannot do</h3>
-            <p className="serif dim" style={{ fontSize: 14.5, lineHeight: 1.55 }}>FlyBrain has no owner, no admin function, no upgrade path and no pause. Every dynamical parameter is immutable. The only way to change the animal is to deploy a different one, and this one keeps living.</p>
+            <p className="serif dim" style={{ fontSize: 14.5, lineHeight: 1.55 }}>FlyBrain has no owner, no admin function, no upgrade path and no pause. Every dynamical parameter is immutable. FlyWorld&apos;s operator can only post checkpoints and report a death; it cannot touch anyone&apos;s tokens or change prices.</p>
             <p style={{ marginTop: 12 }}><a className="btn sm" href={CFG.links.pancake + CFG.token} target="_blank" rel="noopener">Get $FLY</a></p>
           </div>
         </div>

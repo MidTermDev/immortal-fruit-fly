@@ -123,7 +123,7 @@ export class Chain {
     const hex = "0x" + CFG.chainId.toString(16);
     try { await bp.send("wallet_switchEthereumChain", [{ chainId: hex }]); }
     catch (e: any) {
-      if (e && (e.code === 4902 || (e.error && e.error.code === 4902))) await bp.send("wallet_addEthereumChain", [{ chainId: hex, chainName: CFG.chainName, nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 }, rpcUrls: [CFG.rpc[1]], blockExplorerUrls: [CFG.explorer] }]);
+      if (e && (e.code === 4902 || (e.error && e.error.code === 4902))) await bp.send("wallet_addEthereumChain", [{ chainId: hex, chainName: CFG.chainName, nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 }, rpcUrls: [CFG.publicRpc], blockExplorerUrls: [CFG.explorer] }]);
       else throw e;
     }
     this.signer = await bp.getSigner(); this.account = await this.signer.getAddress();

@@ -36,22 +36,28 @@ export default function LiveFly() {
 
   // ---------------------------------------------------------------- live stream
   useEffect(() => {
-    let ws: WebSocket | null = null, brain: BrainLive | null = null, raf = 0, running = true, retry: any = null;
+    let ws: WebSocket | null = null, brain: BrainLive | null = null, raf = 0, running = true, retry: any = null, poll: any = null;
+    const orgRef = { current: "" }; let backoff = 4000;
     const connect = (org: string) => {
-      try { ws?.close(); } catch {}
-      const url = org.replace(/^http/, "ws") + "/ws";
-      ws = new WebSocket(url); setLive("connecting");
-      ws.onopen = () => setLive("live");
-      ws.onmessage = (m) => {
+      clearTimeout(retry); orgRef.current = org;
+      if (!org) { setLive("offline"); return; }
+      const prev = ws; ws = null; try { prev?.close(); } catch {}
+      const sock = new WebSocket(org.replace(/^http/, "ws") + "/ws"); ws = sock; setLive("connecting");
+      sock.onopen = () => { if (sock === ws) { setLive("live"); backoff = 4000; } };
+      sock.onmessage = (m) => {
+        if (sock !== ws) return;
         const j = JSON.parse(m.data); const bin = atob(j.spikes); const arr = new Uint16Array(bin.length / 2);
         for (let i = 0; i < arr.length; i++) arr[i] = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
         frameRef.current = { hdr: j.hdr, spikes: arr }; spikeRate.current = arr.length;
         if (brain) brain.spike(arr);
         setH(j.hdr);
       };
-      ws.onclose = () => { setLive("offline"); if (running) retry = setTimeout(() => connect(org), 4000); };
-      ws.onerror = () => { try { ws?.close(); } catch {} };
+      sock.onclose = () => { if (sock !== ws) return; setLive("offline"); if (running) { retry = setTimeout(() => connect(orgRef.current), backoff); backoff = Math.min(60000, backoff * 1.6); } };
+      sock.onerror = () => { try { sock.close(); } catch {} };
     };
+    let last = performance.now();
+    const loop = (now: number) => { if (!running) return; const dt = Math.min(0.1, (now - last) / 1000); last = now; if (brain) brain.frame(dt); drawArena(); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
     (async () => {
       try { const buf = await (await fetch(`${CFG.basePath}/assets/brain_points_v2.bin`)).arrayBuffer(); if (brainRef.current) brain = new BrainLive(brainRef.current, buf); } catch (e) { console.warn("WebGL unavailable", e); }
       let org = CFG.liveFallback;
@@ -60,12 +66,9 @@ export default function LiveFly() {
         const [wi, evs] = await Promise.all([ch.worldInfo(), ch.worldEvents(40000)]);
         setInfo(wi); setEvents(evs.slice(0, 60));
         const o = ch.liveOrigin(evs); if (o) org = o;
-        setInterval(async () => { try { const evs2 = await ch.worldEvents(40000); setEvents(evs2.slice(0, 60)); setInfo(await ch.worldInfo()); const o2 = ch.liveOrigin(evs2); if (o2 && o2 !== org) { org = o2; setOrigin(o2); connect(o2); } } catch {} }, 60000);
+        poll = setInterval(async () => { try { const evs2 = await ch.worldEvents(40000); setEvents(evs2.slice(0, 60)); setInfo(await ch.worldInfo()); const o2 = ch.liveOrigin(evs2); if (o2 && o2 !== orgRef.current) { setOrigin(o2); connect(o2); } } catch {} }, 60000);
       } catch (e) { console.warn("chain unavailable", e); }
       setOrigin(org); connect(org);
-      let last = performance.now();
-      const loop = (now: number) => { if (!running) return; const dt = Math.min(0.1, (now - last) / 1000); last = now; if (brain) brain.frame(dt); drawArena(); raf = requestAnimationFrame(loop); };
-      raf = requestAnimationFrame(loop);
     })();
     const drawArena = () => {
       const c = arenaRef.current, f = frameRef.current; if (!c) return; const g = c.getContext("2d")!;
@@ -96,7 +99,7 @@ export default function LiveFly() {
       g.fillStyle = "rgba(232,230,224,0.35)"; g.font = `${Math.round(9.5 * dpr)}px ui-monospace, monospace`; g.textAlign = "left"; g.textBaseline = "bottom";
       g.fillText(`${A} × ${A} body lengths · ${hd.mode}`, cx - S / 2 + 8 * dpr, cy + S / 2 - 6 * dpr);
     };
-    return () => { running = false; clearTimeout(retry); cancelAnimationFrame(raf); try { ws?.close(); } catch {}; if (brain) brain.dispose(); };
+    return () => { running = false; clearTimeout(retry); clearInterval(poll); cancelAnimationFrame(raf); const s = ws; ws = null; try { s?.close(); } catch {}; if (brain) brain.dispose(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -119,11 +122,13 @@ export default function LiveFly() {
   const resurrect = async () => {
     const ch = chainRef.current; if (!ch || !wallet) return setToast("Connect a wallet first.");
     setBusy(true);
-    try { setToast("Resurrect: confirm in your wallet…", 90000); const rc = await ch.resurrectWorld(ethers.parseEther(String(Number(resFood) || 0)), info.resPrice); setToast(`Resurrected in block ${fmt(rc.blockNumber)}.`); }
+    const extra = Number(resFood) || 0; if (extra < 60) return setToast("Give it at least 60 seconds of food to live on, or it starves again immediately.");
+    try { setToast("Resurrect: confirm in your wallet…", 90000); const rc = await ch.resurrectWorld(ethers.parseEther(String(extra)), info.resPrice); setToast(`Resurrected in block ${fmt(rc.blockNumber)}.`); }
     catch (e: any) { setToast(`Failed: ${e.shortMessage || e.reason || e.message}`, 8000); } finally { setBusy(false); }
   };
 
-  const R = h?.rates || {}; const alive = h ? h.alive : true;
+  const R = h?.rates || {}; const alive = info ? info.alive : h ? h.alive : true; const streaming = live === "live" && !!h;
+  const chainCheckpoints = events.filter((e) => e.name === "Checkpoint").length;
   const energyS = h ? h.energy : 0; const hoursLeft = energyS / 3600;
   const evRow = (e: Ev, i: number) => {
     const a = e.args; let act = "tick", txt: React.ReactNode = e.name;
@@ -157,14 +162,14 @@ export default function LiveFly() {
               <div className="bar"><i style={{ width: `${Math.min(100, (100 * hoursLeft) / 2)}%` }} /></div>
               <div className="cap"><span>{h ? `${fmt(Math.round(energyS))} s of energy` : ""}</span><span>{h ? `${h.food.length} food item${h.food.length === 1 ? "" : "s"} in the arena` : ""}</span></div>
             </div>
-            <div className="crow"><span>status</span><span><span className={`dot${alive ? "" : " dead"}${live === "live" ? "" : " sim"}`} style={{ display: "inline-block", marginRight: 7 }} />{alive ? "alive" : "dead"}</span></div>
+            <div className="crow"><span>status</span><span><span className={`dot${alive ? "" : " dead"}${streaming ? "" : " sim"}`} style={{ display: "inline-block", marginRight: 7 }} />{alive ? (streaming ? "alive" : "alive · stream offline") : "dead"}</span></div>
             <div className="crow"><span>generation</span><span>{h ? h.generation : "—"}</span></div>
             <div className="crow"><span>age</span><span>{h ? hms(h.t_ms / 1000) : "—"}</span></div>
             <div className="crow"><span>spikes fired</span><span>{h ? fmt(h.spikes_total) : "—"}</span></div>
-            <div className="crow"><span>firing now</span><span>{h ? `${fmt(spikeRate.current * 10)} / s (rendered subset)` : "—"}</span></div>
+            <div className="crow"><span>firing now</span><span>{streaming ? `${fmt(spikeRate.current * 10)} / s (rendered subset)` : "—"}</span></div>
             <div className="crow"><span>eaten · jumps · caught</span><span>{h ? `${Math.round(h.ate)} s · ${h.jumps} · ${h.hits}` : "—"}</span></div>
             <div className="crow"><span>speed</span><span>{h ? `${h.realtime}× real time` : "—"}</span></div>
-            <div className="crow"><span>checkpoints on-chain</span><span>{h ? h.chain.checkpoints : "—"}</span></div>
+            <div className="crow"><span>checkpoints on-chain</span><span>{events.length ? `${chainCheckpoints} in the last 40k blocks` : "—"}</span></div>
           </aside>
         </div>
       </section>
@@ -176,7 +181,7 @@ export default function LiveFly() {
             <p className="cap"><b>Fig. 1 |</b> 41,873 of the 139,248 neurons, each lit the instant it spikes in the running simulation. Optic lobes to either side, central brain in the middle. Watch the antennal lobes and mushroom bodies light up when the fly is in an odor plume, and the descending neurons at the base when it turns. Drag to rotate.</p>
           </div>
           <div className="panel p-brain">
-            <span className="panel-note tl">FlyWire 783 · {live === "live" ? "live spikes" : "waiting for stream"}</span>
+            <span className="panel-note tl">FlyWire 783 · {streaming ? "live spikes" : live === "connecting" ? "connecting to the stream…" : "stream offline · last known state"}</span>
             <span className="panel-note tr">{h ? `${fmt(spikeRate.current)} rendered somata fired in the last 100 ms` : ""}</span>
             <span className="panel-note bl">brain width ≈ 800 µm</span>
             <canvas ref={brainRef} aria-label="Three-dimensional point cloud of the fruit fly brain, each soma lit as it spikes" />
@@ -192,7 +197,7 @@ export default function LiveFly() {
           </div>
           <div className="grid2">
             <div className="cell">
-              <div className="cell-t"><span className="a">a</span><span className="n">World</span><span className="r">{h ? `(${h.x.toFixed(1)}, ${h.y.toFixed(1)}) · ${Math.round(((h.heading * 180) / Math.PI + 360) % 360)}°` : ""}</span></div>
+              <div className="cell-t"><span className="a">a</span><span className="n">World</span><span className="r">{h ? `(${h.x.toFixed(1)}, ${h.y.toFixed(1)}) · ${Math.round((((h.heading * 180) / Math.PI) % 360 + 360) % 360)}°` : ""}</span></div>
               <div className="cell-b b-arena"><canvas ref={arenaRef} className="walk-c" onClick={arenaClick} aria-label="Top-down view of the arena with food, fly and predator" /></div>
               <div className="cell-cap"><span><i style={{ "--c": "#f0b429" } as any} />food + plume</span><span><i style={{ "--c": "#ff5a35" } as any} />fly</span><span><i style={{ "--c": "#58c4f5" } as any} />predator</span><span style={{ marginLeft: "auto" }}>{pick ? `chosen: (${pick.x}, ${pick.y})` : "click to choose a food spot"}</span></div>
             </div>
@@ -236,12 +241,13 @@ export default function LiveFly() {
                 <a className="btn sm plain" href={`${CFG.explorer}/address/${CFG.world}`} target="_blank" rel="noopener">FlyWorld on BscScan →</a>
               </>) : (<>
                 <p>Energy reached zero. The brain was frozen and its hash written on-chain. Burn $FLY to wake the same brain in a new body.</p>
-                <div className="field"><input type="number" min={0} value={resFood} onChange={(e) => setResFood(e.target.value)} aria-label="Extra food" /><button className="btn fill" disabled={busy} onClick={resurrect}>Resurrect</button></div>
+                <div className="field"><input type="number" min={60} value={resFood} onChange={(e) => setResFood(e.target.value)} aria-label="Seconds of food to wake up with" /><button className="btn fill" disabled={busy} onClick={resurrect}>Resurrect</button></div>
+                <div className="lbl">= {Number(resFood) ? hms(Number(resFood)) : "—"} of life on waking · minimum 60 s</div>
               </>)}
             </div>
             <div className="care-col">
               <div className="care-t"><h3>Verify it</h3><span className="cost">{h?.chain?.last_hash ? h.chain.last_hash.slice(0, 10) + "…" : ""}</span></div>
-              <p>Each checkpoint names a snapshot of every membrane potential and synaptic current. Download it, run the published model with the same seed, and you get the next checkpoint&apos;s hash.</p>
+              <p>Each checkpoint names a snapshot: every membrane potential, synaptic current and refractory clock, the full world state, and the step at which each on-chain event was applied. <code>brain/verify.py</code> replays one snapshot into the next and checks the hash. Snapshots are served while the operator&apos;s server is up.</p>
               <a className="btn sm" href={`${origin}/snapshots/`} target="_blank" rel="noopener">Snapshots ↗</a>
               <a className="btn sm plain" href={CFG.links.github + "/tree/main/brain"} target="_blank" rel="noopener">Simulator source →</a>
             </div>

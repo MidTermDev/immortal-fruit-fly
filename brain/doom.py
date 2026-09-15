@@ -15,7 +15,7 @@
 
     ../.venv/bin/python doom.py --minutes 6 --out doom_run
 """
-import os, sys, json, time, math, subprocess, argparse, threading, queue, re
+import os, sys, json, time, math, subprocess, argparse, threading, queue, re, fcntl
 import numpy as np
 os.environ.setdefault('NUMBA_NUM_THREADS', '14')
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.join(HERE, '..')
@@ -30,6 +30,7 @@ ARCADE = os.environ.get('FLYARCADE', '0x3dE4fe3535dd9E1CC17b6718B985593e3E463279
 RPC = (open(os.path.join(HERE, 'rpc.txt')).read().strip() if os.path.exists(os.path.join(HERE, 'rpc.txt')) else 'https://bsc-dataseed.bnbchain.org')
 PK = os.environ.get('PRIVATE_KEY') or ('0x' + open(os.path.join(ROOT, 'deploy.txt')).read().strip())
 STEPS = 16; FPS = 10; W_VID, H_VID = 1280, 720
+SENDLOCK = os.path.join(HERE, '.sendlock')
 FOOD_GLOMERULI = ['DM1', 'DM4', 'VA2', 'DM2', 'VM2', 'DP1m']
 
 
@@ -42,6 +43,16 @@ def cast(*a, timeout=90):
 def s256(x): x = int(x); return x - (1 << 256) if x >= (1 << 255) else x
 
 
+def send(*args, gas=None):
+    """cast send serialized across processes on this machine (the live server shares the operator key)."""
+    with open(SENDLOCK, 'w') as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        out = cast('send', '--rpc-url', RPC, '--private-key', PK, *(['--gas-limit', str(gas)] if gas else []), *args, '--json', timeout=150)
+    rc = json.loads(out)
+    if rc.get('status') not in ('0x1', 1, '1'): raise RuntimeError('reverted ' + rc.get('transactionHash', ''))
+    return rc
+
+
 # ------------------------------------------------------------------ the whole brain as the player
 class Player:
     def __init__(self):
@@ -49,12 +60,12 @@ class Player:
         self.orn_l = np.concatenate([p[f'ORN_{g}'][side[p[f'ORN_{g}']] == 0] for g in FOOD_GLOMERULI]).astype(np.int32)
         self.orn_r = np.concatenate([p[f'ORN_{g}'][side[p[f'ORN_{g}']] == 1] for g in FOOD_GLOMERULI]).astype(np.int32)
         allorn = np.concatenate([v for k, v in p.items() if k.startswith('ORN_')]); self.orn_rest = np.setdiff1d(allorn, np.concatenate([self.orn_l, self.orn_r])).astype(np.int32)
-        self.trigger = np.concatenate([p['DNp01_left'], p['DNp01_right'], p['DNp02_left'], p['DNp02_right'], p['DNp11_left'], p['DNp11_right']])
+        self.trigger = np.concatenate([p['DNp01_left'], p['DNp01_right']])   # the giant fiber, and only the giant fiber
         self.readouts = ['DNa02_left', 'DNa02_right', 'DNa01_left', 'DNa01_right', 'DNa_left', 'DNa_right', 'DN_all', 'DNp01_left', 'DNp01_right', 'LC4_left', 'LC4_right', 'ALPN', 'KC', 'MBON']
         self.rates = {k: 0.0 for k in self.readouts}; self.slow = dict(self.rates); self.base = dict(self.rates)
         self.scene = {'scent_l': 0.0, 'scent_r': 0.0, 'loomL': 0.0, 'loomR': 0.0, 'sizeL': 0.0, 'sizeR': 0.0, 'lightL': 0.3, 'lightR': 0.3}
         self.steer = 0.0; self.fire_pending = 0; self.trigger_spikes = 0; self.chunk_ms = 50
-        self.lock = threading.Lock(); self.running = True; self.hash_req = None
+        self.lock = threading.Lock(); self.flock = threading.Lock(); self.running = True; self.hash_req = None
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
@@ -69,35 +80,43 @@ class Player:
             tot, win, _, _ = b.run(ms, record=False)
             for r in self.readouts:
                 inst = b.pop_rate(r, win, ms); self.rates[r] += a * (inst - self.rates[r]); self.slow[r] += asl * (inst - self.slow[r]); self.base[r] += ab * (self.slow[r] - self.base[r])
-            d = lambda k: self.slow[k] - self.base[k]
-            st = (d('DNa02_left') - d('DNa02_right')) + 0.6 * (d('DNa01_left') - d('DNa01_right')) + 12.0 * (d('DNa_left') - d('DNa_right'))
+            S = self.slow
+            # Measured on this model (brain/diag2.py), sustained odor on one antenna: DNa02-left sits at ~15 Hz
+            # for LEFT odor and ~75 Hz for RIGHT odor (DNa02-right stays near 0); the DNa population L-R is ~0
+            # for LEFT and ~+2.5 for RIGHT. So the lateralized response here is contralateral, and the readout
+            # uses the sign the model exhibits. steer > 0 = turn left.
+            st = -((S['DNa02_left'] - S['DNa02_right'] - 40.0) + 12.0 * (S['DNa_left'] - S['DNa_right'] - 0.3))
             self.steer += ast * (st - self.steer)
             g = int(win[self.trigger].sum()); self.trigger_spikes += g
-            if g > 0: self.fire_pending += 1
+            if g > 0:
+                with self.flock: self.fire_pending += 1
             if self.hash_req is not None:
                 self.hash_req['hash'] = b.state_hash(); self.hash_req['step'] = b.t; self.hash_req['spikes'] = b.total_spikes; self.hash_req = None
 
     def set_scene(self, enemies, light_l, light_r):
         """enemies: list of (bearing_rad [+ = left], size_deg, dsize_deg_per_s)."""
         cl = cr = loomL = loomR = sizeL = sizeR = 0.0
+        if enemies:
+            br, sz, _ = max(enemies, key=lambda e: e[1])   # the fly hunts the nearest (largest) enemy by scent
+            w = min(1.0, 0.4 + sz / 12.0)
+            k = max(-1.0, min(1.0, 8.0 * math.sin(br)))     # bilateral scent, sharpened as in the arena (gain 8, clipped)
+            cl = w * (1 + k) / 2; cr = w * (1 - k) / 2
         for br, sz, dsz in enemies:
-            w = min(1.0, sz / 12.0)                       # closer enemies smell stronger
-            # bilateral scent, sharpened as in the arena (gain 8, clipped)
-            k = max(-1.0, min(1.0, 8.0 * math.sin(br)))
-            cl += w * (1 + k) / 2; cr += w * (1 - k) / 2
             if br > 0: loomL += 6.0 * max(0.0, dsz); sizeL += 4.0 * sz
             else: loomR += 6.0 * max(0.0, dsz); sizeR += 4.0 * sz
         with self.lock: self.scene.update(scent_l=min(1.2, cl), scent_r=min(1.2, cr), loomL=loomL, loomR=loomR, sizeL=sizeL, sizeR=sizeR, lightL=light_l, lightR=light_r)
 
     def take_fire(self):
-        f = self.fire_pending > 0; self.fire_pending = 0; return f
+        with self.flock: f = self.fire_pending > 0; self.fire_pending = 0
+        return f
 
     def snapshot_hash(self):
+        """Hash of the whole brain at the next 50 ms chunk boundary (never a placeholder)."""
         req = {}; self.hash_req = req
-        for _ in range(200):
+        for _ in range(400):
             if self.hash_req is None and req: return req
             time.sleep(0.01)
-        return req or {'hash': '0' * 64, 'step': self.b.t, 'spikes': self.b.total_spikes}
+        raise RuntimeError('brain thread did not answer the hash request')
 
 
 # ------------------------------------------------------------------ the chain: arcade log + on-chain compass core
@@ -108,7 +127,7 @@ class ChainLog:
         self.core = CoreSim(self.circuit, json.load(open(os.path.join(ROOT, 'contracts', 'data', 'params_v2.json'))), energy=10**9); self.core.record_ids = True
         self.TICKED = cast('keccak', 'Ticked(address,uint64,uint16,uint32,int32,int32,int64,int64,uint64)')
         self.sync_core()
-        self.q = queue.Queue(); self.decisions = []; self.core_txs = []; self.mismatch = 0; self.session = None; self.last_decision = None; self.last_core = None
+        self.q = queue.Queue(); self.inflight = {'decision': 0, 'core': 0}; self.decisions = []; self.core_txs = []; self.mismatch = 0; self.session = None; self.last_decision = None; self.last_core = None
         self.raster = []
         threading.Thread(target=self._worker, daemon=True).start()
 
@@ -123,27 +142,30 @@ class ChainLog:
 
     def start(self, game):
         h = self.player.snapshot_hash()
-        out = cast('send', '--rpc-url', RPC, '--private-key', PK, ARCADE, 'startSession(string,bytes32,uint64)', game, '0x' + h['hash'], str(h['step']), '--json', timeout=120)
-        rc = json.loads(out); self.session = int(cast('call', '--rpc-url', RPC, ARCADE, 'sessionCount()(uint256)').split()[0]) - 1
+        rc = send(ARCADE, 'startSession(string,bytes32,uint64)', game, '0x' + h['hash'], str(h['step']), gas=300000); self.session = int(cast('call', '--rpc-url', RPC, ARCADE, 'sessionCount()(uint256)').split()[0]) - 1
         print('session', self.session, 'started in block', int(rc['blockNumber'], 16))
+
+    def pending(self, kind): return self.inflight[kind]
+
+    def put(self, job): self.inflight[job['kind']] += 1; self.q.put(job)
 
     def _worker(self):
         while True:
             job = self.q.get()
             try:
                 if job['kind'] == 'decision':
-                    h = self.player.snapshot_hash()
-                    out = cast('send', '--rpc-url', RPC, '--private-key', PK, '--gas-limit', '200000', ARCADE, 'decide(uint256,bytes32,uint64,int16,bool,uint32,uint16,uint16,uint32)',
-                               str(self.session), '0x' + h['hash'], str(h['step']), str(job['turn']), 'true' if job['fire'] else 'false', str(h['spikes'] % (1 << 32)), str(job['kills']), str(max(0, job['health'])), str(job['tic']), '--json', timeout=120)
-                    rc = json.loads(out); d = {'n': len(self.decisions) + 1, 'tx': rc['transactionHash'], 'block': int(rc['blockNumber'], 16), 'hash': h['hash'], 'step': h['step'], 'turn': job['turn'], 'fire': job['fire'], 'kills': job['kills'], 'health': job['health'], 'gas': int(rc['gasUsed'], 16)}
+                    h = job['h']
+                    rc = send(ARCADE, 'decide(uint256,bytes32,uint64,int16,bool,uint32,uint16,uint16,uint32)', str(self.session), '0x' + h['hash'], str(h['step']), str(job['turn']), 'true' if job['fire'] else 'false', str(h['spikes'] % (1 << 32)), str(job['kills']), str(max(0, job['health'])), str(job['tic']), gas=200000)
+                    d = {'n': len(self.decisions) + 1, 'tx': rc['transactionHash'], 'block': int(rc['blockNumber'], 16), 'hash': h['hash'], 'step': h['step'], 'turn': job['turn'], 'fire': job['fire'], 'kills': job['kills'], 'health': job['health'], 'gas': int(rc['gasUsed'], 16)}
                     self.decisions.append(d); self.last_decision = d
                 elif job['kind'] == 'core':
                     wedge = job['wedge']; n0 = len(self.core.spike_lists)
-                    if wedge is None: out = cast('send', '--rpc-url', RPC, '--private-key', PK, '--gas-limit', '9500000', BRAIN, 'tick(uint16)', str(STEPS), '--json', timeout=120)
-                    else: out = cast('send', '--rpc-url', RPC, '--private-key', PK, '--gas-limit', '9500000', BRAIN, 'stimulate(uint8,uint8,uint8,uint16)', '1', str(wedge), '4', str(STEPS), '--json', timeout=120)
-                    rc = json.loads(out); ev = None
-                    if rc.get('status') not in ('0x1', 1, '1'):
-                        print('core tx reverted; resyncing local replay'); self.sync_core(); self.core.spike_lists = self.core.spike_lists[:n0]; continue
+                    try:
+                        if wedge is None: rc = send(BRAIN, 'tick(uint16)', str(STEPS), gas=9500000)
+                        else: rc = send(BRAIN, 'stimulate(uint8,uint8,uint8,uint16)', '1', str(wedge), '4', str(STEPS), gas=9500000)
+                    except Exception as e:
+                        print('core tx failed; resyncing local replay:', str(e)[:100]); self.sync_core(); self.core.spike_lists = self.core.spike_lists[:n0]; continue
+                    ev = None
                     for l in rc.get('logs', []):
                         if l['topics'][0] == self.TICKED:
                             dd = l['data'][2:]; w = [int(dd[i:i + 64], 16) for i in range(0, len(dd), 64)]
@@ -151,7 +173,8 @@ class ChainLog:
                     if wedge is not None: self.core.stimulate(CH_CUE, wedge, 4)
                     self.core.tick(STEPS); local_spikes = sum(len(s) for s in self.core.spike_lists[n0:])
                     ok = ev is not None and ev['headX'] == self.core.headX and ev['headY'] == self.core.headY and ev['spikes'] == local_spikes
-                    if not ok: self.mismatch += 1
+                    if not ok:
+                        self.mismatch += 1; self.sync_core()   # someone else ticked the contract; pick up its state again
                     self.raster += self.core.spike_lists[n0:]; self.raster = self.raster[-160:]
                     hx, hy = (ev['headX'], ev['headY']) if ev else (self.core.headX, self.core.headY)
                     t = {'tx': rc['transactionHash'], 'block': int(rc['blockNumber'], 16), 'gas': int(rc['gasUsed'], 16), 'wedge': wedge, 'spikes': ev['spikes'] if ev else 0, 'energy': ev['energy'] if ev else 0, 'ok': ok, 'angle': math.atan2(hy, hx) if (hx or hy) else None, 'mag': math.hypot(hx, hy)}
@@ -159,10 +182,10 @@ class ChainLog:
             except Exception as e:
                 print('chain job failed:', job['kind'], str(e)[:160])
             finally:
-                self.q.task_done()
+                self.inflight[job['kind']] -= 1; self.q.task_done()
 
     def end(self):
-        try: cast('send', '--rpc-url', RPC, '--private-key', PK, ARCADE, 'endSession(uint256)', str(self.session), '--json', timeout=120)
+        try: send(ARCADE, 'endSession(uint256)', str(self.session), gas=100000)
         except Exception as e: print('endSession failed', e)
 
 
@@ -199,7 +222,7 @@ class Recorder:
             self.bar(d, x0, y, 230, lab, v, mx, col); y += 17
         d.text((x0, y + 4), f"steer {pl.steer:+.1f}  →  {'TURN LEFT' if stats['turn'] > 0 else 'TURN RIGHT' if stats['turn'] < 0 else 'hold'}     scent L {pl.scene['scent_l']:.2f} / R {pl.scene['scent_r']:.2f}", font=self.FS, fill=(232, 230, 224))
         if stats.get('fire_flash', 0) > 0: d.text((x0 + 300, 70), '▶ FIRE  (giant fiber)', font=self.FB, fill=(255, 90, 53))
-        d.text((x0, y + 22), f"enemies in sight {stats['enemies']}   kills {stats['kills']}   health {stats['health']:.0f}   trigger spikes {pl.trigger_spikes}", font=self.FS, fill=(139, 145, 156))
+        d.text((x0, y + 22), f"enemies in sight {stats['enemies']}   kills {stats['kills']}   health {stats['health']:.0f}   giant-fiber spikes {pl.trigger_spikes}   {stats.get('rt', 1.0):.2f}x real time", font=self.FS, fill=(139, 145, 156))
         # --- the chain
         cy = y + 52; d.line([x0, cy - 8, W_VID - 16, cy - 8], fill=(40, 44, 50))
         d.text((x0, cy), 'ON BNB SMART CHAIN', font=self.FB, fill=(226, 52, 26))
@@ -244,7 +267,7 @@ def main():
     g.set_available_game_variables([vzd.GameVariable.HEALTH, vzd.GameVariable.KILLCOUNT, vzd.GameVariable.ANGLE, vzd.GameVariable.POSITION_X, vzd.GameVariable.POSITION_Y])
     g.set_available_buttons([vzd.Button.TURN_LEFT_RIGHT_DELTA, vzd.Button.ATTACK]); g.set_episode_timeout(100000); g.set_mode(vzd.Mode.PLAYER); g.init(); g.new_episode(); g.send_game_command('give ammo')
 
-    t0 = time.time(); prev = {}; stats = {'turn': 0, 'fire_flash': 0, 'enemies': 0, 'kills': 0, 'health': 100.0, 'elapsed': 0}; episodes = 1
+    t0 = time.time(); prev = {}; stats = {'turn': 0, 'fire_flash': 0, 'enemies': 0, 'kills': 0, 'health': 100.0, 'elapsed': 0, 'toward': 0, 'away': 0}; episodes = 1
     next_dec = time.time() + 2; next_core = time.time() + 3; fired_since = False; turn_acc = 0
     while time.time() - t0 < a.minutes * 60:
         if g.is_episode_finished(): episodes += 1; g.new_episode(); g.send_game_command('give ammo'); prev.clear(); continue
@@ -262,26 +285,31 @@ def main():
             size = math.degrees(2 * math.atan(40 / dist)); dsz = (size - prev.get(l.object_id, size)) / 0.1; prev[l.object_id] = size
             en.append((bearing, size, dsz))
         fr = s.screen_buffer; pl.set_scene(en, float(fr[:, :320].mean()) / 255, float(fr[:, 320:].mean()) / 255)
-        stats.update(enemies=len(en), kills=int(g.get_game_variable(vzd.GameVariable.KILLCOUNT)), health=g.get_game_variable(vzd.GameVariable.HEALTH), elapsed=time.time() - t0)
+        stats.update(enemies=len(en), kills=int(g.get_game_variable(vzd.GameVariable.KILLCOUNT)), health=g.get_game_variable(vzd.GameVariable.HEALTH), elapsed=time.time() - t0, rt=(pl.b.t * 1e-4) / max(1e-6, time.time() - t0))
         # --- act: turning from the DNa readout, firing from the giant fiber
-        st = pl.steer; delta = max(-3.5, min(3.5, -0.25 * st))       # degrees per tic (max ~120 deg/s); positive turns right in ViZDoom, steer > 0 means left
+        st = pl.steer; delta = 0.0 if abs(st) < 4.0 else max(-3.0, min(3.0, -0.2 * st))   # degrees per tic (max ~85 deg/s); positive turns right in ViZDoom, steer > 0 means left
         turn = 1 if delta < -0.5 else -1 if delta > 0.5 else 0
         fire = 1 if pl.take_fire() else 0
         if fire: stats['fire_flash'] = 4; fired_since = True
         stats['turn'] = turn; stats['fire_flash'] = max(0, stats['fire_flash'] - 1); turn_acc += int(round(-delta * 3))   # degrees turned this frame, left positive
+        if en and turn != 0:
+            nearest = max(en, key=lambda e: e[1])
+            if abs(nearest[0]) > math.radians(8): stats['toward' if (nearest[0] > 0) == (turn > 0) else 'away'] += 1
         g.make_action([delta, fire], 3)
         # --- chain
         if ch:
             now = time.time()
-            if now >= next_dec and ch.session is not None:
-                ch.q.put({'kind': 'decision', 'turn': max(-32768, min(32767, turn_acc)), 'fire': fired_since, 'kills': stats['kills'], 'health': int(stats['health']), 'tic': s.number}); turn_acc = 0; fired_since = False; next_dec = now + a.decision_every
-            if now >= next_core:
+            if now >= next_dec and ch.session is not None and ch.pending('decision') == 0:
+                h = pl.snapshot_hash()   # the hash of the brain at the moment of this decision, whatever block it lands in
+                ch.put({'kind': 'decision', 'h': h, 'turn': max(-32768, min(32767, turn_acc)), 'fire': fired_since, 'kills': stats['kills'], 'health': int(stats['health']), 'tic': s.number}); turn_acc = 0; fired_since = False; next_dec = now + a.decision_every
+            if now >= next_core and ch.pending('core') == 0:
                 threat = max(en, key=lambda e: e[1]) if en else None
-                ch.q.put({'kind': 'core', 'wedge': None if threat is None else int(round(threat[0] / (2 * math.pi / 16))) % 16}); next_core = now + a.core_every
+                ch.put({'kind': 'core', 'wedge': None if threat is None else int(round(threat[0] / (2 * math.pi / 16))) % 16}); next_core = now + a.core_every
         rec.frame(s.screen_buffer, pl, ch or _NoChain(), stats)
-    g.close(); rec.close(); pl.running = False
+    g.close(); rec.close()
     if ch: ch.q.join(); ch.end()
-    summary = {'minutes': a.minutes, 'episodes': episodes, 'kills': stats['kills'], 'trigger_spikes': pl.trigger_spikes, 'decisions': ch.decisions if ch else [], 'core_txs': ch.core_txs if ch else [], 'core_replay_mismatches': ch.mismatch if ch else None, 'session': ch.session if ch else None, 'arcade': ARCADE, 'brain': BRAIN}
+    pl.running = False
+    summary = {'minutes': a.minutes, 'episodes': episodes, 'kills': stats['kills'], 'trigger_spikes': pl.trigger_spikes, 'turn_toward_frames': stats['toward'], 'turn_away_frames': stats['away'], 'decisions': ch.decisions if ch else [], 'core_txs': ch.core_txs if ch else [], 'core_replay_mismatches': ch.mismatch if ch else None, 'session': ch.session if ch else None, 'arcade': ARCADE, 'brain': BRAIN}
     json.dump(summary, open(os.path.join(a.out, 'run.json'), 'w'), indent=1)
     print(f"done: kills {stats['kills']}, {len(summary['decisions'])} decisions on-chain, {len(summary['core_txs'])} core ticks ({summary['core_replay_mismatches']} replay mismatches), video {os.path.join(a.out, 'doom_fly.mp4')}")
 

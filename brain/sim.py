@@ -24,7 +24,7 @@ W_SYN = 0.275       # mV per synapse
 NCHUNK = 64
 
 
-@njit(cache=True, fastmath=True, parallel=True, nogil=True)
+@njit(cache=True, fastmath=False, parallel=True, nogil=True)
 def _run(steps, t0, v, g, ref_until, ring, indptr, post, w, drive_ids, drive_p, counts, seed, spike_ids_out, spike_ts_out, max_out):
     """Advance the network `steps` steps starting at absolute step t0.
     drive_ids / drive_p: neurons forced to spike with probability drive_p per step.
@@ -142,8 +142,9 @@ class WholeBrain:
         return float(window_counts[pop].sum()) / max(1, len(pop)) / (ms / 1000.0)
 
     def state_hash(self):
+        """sha256 over every membrane potential, synaptic drive, delayed input, refractory clock, and the step counter."""
         import hashlib
-        h = hashlib.sha256(); h.update(self.v.tobytes()); h.update(self.g.tobytes()); h.update(self.ring.tobytes()); h.update(np.int64(self.t).tobytes())
+        h = hashlib.sha256(); h.update(self.v.tobytes()); h.update(self.g.tobytes()); h.update(self.ring.tobytes()); h.update(self.ref_until.tobytes()); h.update(np.int64(self.t).tobytes())
         return h.hexdigest()
 
     def save(self, path):

@@ -42,6 +42,9 @@ for s in ('left', 'right'):
         pops[f'{t}_{s}'] = ids((ann.cell_type.values == t) & (side == s))
     for t in ('DNa02', 'DNa01', 'DNa03', 'DNp09', 'MDN', 'DNp01', 'DNb02', 'DNg13', 'DNp02', 'DNp11', 'DNp04'):
         pops[f'{t}_{s}'] = ids((ann.cell_type.values == t) & (side == s))
+for pre in ('DNa', 'DNg', 'DNb', 'DNp'):
+    for s_, si in (('left', 'left'), ('right', 'right')):
+        pops[f'{pre}_{s_}'] = ids(pd.Series(ann.cell_type.values).str.startswith(pre).values & (side == si))
 pops['GRN_labellar'] = ids((ann.cell_class.values == 'gustatory') & pd.Series(ann.cell_type.values).str.startswith('LB').values)
 pops['GRN_all'] = ids(ann.cell_class.values == 'gustatory')
 pops['JO_wind'] = ids(pd.Series(ann.cell_type.values).str.startswith(('JO-A', 'JO-B')).values)

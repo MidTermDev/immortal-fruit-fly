@@ -5,10 +5,11 @@ export const CFG = {
   // (Vercel: set RPC_URL, never exposed to the browser), then public endpoints.
   rpc: [
     ...(process.env.NEXT_PUBLIC_RPC_URL ? [process.env.NEXT_PUBLIC_RPC_URL] : []),
-    ...(process.env.NEXT_PUBLIC_RPC_PROXY === "1" ? [(process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api/rpc"] : []),
+    ...(process.env.NEXT_PUBLIC_RPC_PROXY === "1" && typeof window !== "undefined" ? [window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH || "") + "/api/rpc"] : []),
     "https://bsc-rpc.publicnode.com", "https://bsc-dataseed.bnbchain.org",
   ],
   explorer: "https://bscscan.com",
+  publicRpc: "https://bsc-dataseed.bnbchain.org",
   token: "0x23791aa3b031659b593cf141a2bc76b0ad657777",
   brain: "0xee80f8cB5309C572343c38b5D717283BBBb517c5",
   brainV1: "0x32D28e97b50f5978eb51d7608492CC7221b01f63",

@@ -189,8 +189,31 @@ class World:
         return ids
 
     def resurrect(self, energy):
-        self.alive = True; self.generation += 1; self.energy = float(energy); self.life_ms = 0.0
+        self.alive = True; self.generation += 1; self.energy = max(30.0, float(energy)); self.life_ms = 0.0   # at least 30 s to find food
         self.x = 0.0; self.y = 0.0; self.heading = 0.0; self.path = [(0.0, 0.0)]; self.log(f'resurrected as generation {self.generation}')
+
+    # ------------------------------------------------------------ persistence
+    DYN = ['x', 'y', 'heading', 'energy', 'alive', 'generation', 'age_ms', 'life_ms', 'ate_total', 'jumps', 'hits', 'steer', 'orn_rates', 'odor_ema', 'odor_trend', 'cast_dir', 'mode', 'next_predator_ms', 'next_food_id', 'lamp']
+
+    def dump_state(self):
+        """Everything that influences the next step, at full precision (for verifiable checkpoints)."""
+        d = {k: getattr(self, k) for k in self.DYN}
+        d['_last_jump'] = getattr(self, '_last_jump', -1e9)
+        d['rates'] = dict(self.rates); d['slow'] = dict(self.slow); d['base'] = dict(self.base)
+        d['food'] = [dict(f) for f in self.food]; d['predator'] = None if not self.predator else dict(self.predator)
+        d['path'] = self.path[-600:]; d['events'] = self.events[-50:]
+        d['rng'] = self.rng.bit_generator.state
+        return d
+
+    def load_state(self, d):
+        for k in self.DYN:
+            if k in d: setattr(self, k, tuple(d[k]) if k in ('orn_rates', 'lamp') else d[k])
+        self._last_jump = d.get('_last_jump', -1e9)
+        for k in ('rates', 'slow', 'base'):
+            if k in d: getattr(self, k).update(d[k])
+        self.food = [dict(f) for f in d.get('food', [])]; self.predator = None if not d.get('predator') else dict(d['predator'])
+        self.path = [tuple(p) for p in d.get('path', [(self.x, self.y)])] or [(self.x, self.y)]; self.events = [tuple(e) for e in d.get('events', [])]
+        if 'rng' in d: self.rng.bit_generator.state = d['rng']
 
     def snapshot(self):
         R = self.rates
