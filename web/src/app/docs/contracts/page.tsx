@@ -35,6 +35,18 @@ event Died(uint32 indexed generation, uint64 ageMs, bytes32 stateHash, string sn
 event Resurrected(uint32 indexed generation, address indexed by, uint256 tokensBurned, uint64 energy);`}</code></pre>
       <p>The operator (the deployer address) can only post attestations about the off-chain simulation; it cannot move anyone&apos;s tokens or change prices. The arena is 240 × 240 body lengths; coordinates outside ±120 revert. Each checkpoint&apos;s <code>snapshotURI</code> points to a downloadable snapshot of every membrane potential and synaptic current, and also tells the website where the live stream is.</p>
 
+      <h2>FlyArcade interface</h2>
+      <p>A record of the whole brain playing a game. Only the operator can post sessions and decisions. FlyArcade holds no funds and has no feeding function; it records reports without verifying the game or neural computation.</p>
+      <pre><code>{`function sessionCount() view returns (uint256);
+function sessions(uint256) view returns (string game, uint64 startBlock, uint64 endBlock, uint32 decisions, uint32 kills, bytes32 finalHash);
+
+event SessionStarted(uint256 indexed id, string game, bytes32 brainHash, uint64 brainStep);
+event Decision(uint256 indexed session, uint32 indexed n, bytes32 brainHash, uint64 brainStep,
+    int16 turn, bool fire, uint32 spikes, uint16 kills, uint16 health, uint32 gameTic);
+event SessionEnded(uint256 indexed id, uint32 decisions, uint32 kills, bytes32 finalHash);`}</code></pre>
+      <p>The DOOM runner periodically logs accumulated turning (positive means left), whether it fired during the interval, and reported game statistics. Kills can reset between episodes. The spike counter is cumulative and wraps at 2³²; it is not a count for that decision alone.</p>
+      <p>Brain hashes cover the model&apos;s membrane potentials, synaptic current, delay ring, and step. They are sampled by the queued writer after the action report; the runner currently saves its video and report locally, without publishing replay snapshots or a live video endpoint. An end block records a closed session; an open session alone does not prove the runner is still active.</p>
+
       <h2>FlyBrain interface (the on-chain core)</h2>
       <pre><code>{`function tick(uint16 steps) external;                       // anyone, gas only
 function feed(uint256 amount) external;                     // burns $FLY, +energy

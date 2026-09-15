@@ -1,8 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { CFG } from "@/lib/config";
 
-export default function SiteHeader({ current, wallet }: { current: "fly" | "docs"; wallet?: ReactNode }) {
+export default function SiteHeader({ current, wallet }: { current: "fly" | "world" | "arcade" | "decisions" | "activity" | "feed" | "docs"; wallet?: ReactNode }) {
   return (
     <header className="site-header">
       <a className="skip-link" href="#main">Skip to content</a>
@@ -16,10 +15,13 @@ export default function SiteHeader({ current, wallet }: { current: "fly" | "docs
           <span>Immortal <span className="brand-fruit">Fruit </span>Fly</span>
         </Link>
         <nav className="site-nav" aria-label="Main navigation">
-          <Link className="dashboard-link" href="/" aria-current={current === "fly" ? "page" : undefined}>The fly</Link>
+          <Link href="/" aria-current={current === "fly" || current === "world" ? "page" : undefined}>Watch</Link>
+          <Link href="/arcade/" aria-current={current === "arcade" ? "page" : undefined}>Arcade</Link>
+          <Link href="/decisions/" aria-current={current === "decisions" ? "page" : undefined}>Decisions</Link>
+          <Link href="/activity/" aria-current={current === "activity" ? "page" : undefined}>Activity</Link>
           <Link href="/docs/" aria-current={current === "docs" ? "page" : undefined}>Docs</Link>
         </nav>
-        <div className="header-action">{wallet ?? <a className="header-source" href={CFG.links.github} target="_blank" rel="noopener noreferrer">GitHub ↗</a>}</div>
+        <div className="header-action">{wallet ?? <Link className="header-feed" href={current === "world" ? "/feed/world/" : "/feed/"} aria-current={current === "feed" ? "page" : undefined}>Feed the fly ↗</Link>}</div>
       </div>
     </header>
   );

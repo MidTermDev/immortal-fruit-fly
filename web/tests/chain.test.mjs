@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { Interface } from "ethers";
 
 const externalRequire = createRequire(import.meta.url);
 
@@ -19,6 +20,7 @@ function loadTypeScript(filename) {
 }
 
 const { Chain, actionError } = loadTypeScript(fileURLToPath(new URL("../src/lib/chain.ts", import.meta.url)));
+const { ARCADE_ABI } = loadTypeScript(fileURLToPath(new URL("../src/lib/arcade-abi.ts", import.meta.url)));
 const receipt = (hash = "0xconfirmed") => ({ hash, status: 1 });
 const transaction = (hash = "0xsubmitted") => ({ hash, wait: async () => receipt() });
 
@@ -181,4 +183,26 @@ test("event reads reject an oversized range before contacting the RPC", async ()
   const { chain } = mockChain();
   chain.provider = { getLogs: async () => { throw new Error("Should not contact RPC"); } };
   await assert.rejects(chain.readEvents("core", 1, 2001), /at most 2,000/);
+});
+
+test("combined activity reads Arcade decisions from the Arcade address with exact steps and signed turns", async () => {
+  const chain = new Chain();
+  const iface = new Interface(ARCADE_ABI);
+  const hash = `0x${"ab".repeat(32)}`;
+  const brainStep = (1n << 64n) - 1n;
+  const encoded = iface.encodeEventLog(iface.getEvent("Decision"), [2n, 5, hash, brainStep, -125, true, 4294967295, 3, 75, 200]);
+  let requested;
+  chain.provider = { getLogs: async (request) => {
+    requested = request;
+    return [{ ...encoded, blockNumber: 9000, transactionHash: hash, index: 2 }];
+  } };
+  const events = await chain.readEvents("arcade", 8999, 9001);
+  assert.equal(requested.address.toLowerCase(), "0x3de4fe3535dd9e1cc17b6718b985593e3e463279");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].source, "arcade");
+  assert.equal(events[0].name, "Decision");
+  assert.equal(events[0].args.brainStep, brainStep);
+  assert.equal(events[0].args.turn, -125n);
+  assert.equal(events[0].args.fire, true);
+  assert.equal(events[0].id, `arcade:${hash}:2`);
 });

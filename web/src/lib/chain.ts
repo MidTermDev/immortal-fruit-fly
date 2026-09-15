@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { CFG } from "./config";
+import { ARCADE_ABI } from "./arcade-abi";
 import type { FlyPrices, FlySnapshot, TransactionProgress } from "./fly-types";
 
 export const BRAIN_ABI = [
@@ -65,7 +66,7 @@ export function actionError(error: unknown): string {
   return e?.message && !e.code && e.message.length < 180 ? e.message : "Something went wrong. Please try again.";
 }
 
-export type EventSource = "core" | "world";
+export type EventSource = "core" | "world" | "arcade";
 export type ChainEvent = { name: string; args: ethers.Result; block: number; tx: string; index?: number; id?: string; source?: EventSource };
 export interface WorldInfo {
   alive: boolean; generation: number; lastAgeMs: number; lastEnergy: number; lastEnergyRaw: bigint;
@@ -171,12 +172,13 @@ export class Chain {
     if (toBlock < fromBlock) return [];
     if (toBlock - fromBlock >= 2000) throw new Error("Read at most 2,000 blocks at a time.");
     const contract = source === "world" ? this.world : this.brain;
-    const address = source === "world" ? CFG.world : CFG.brain;
+    const address = source === "arcade" ? CFG.arcade : source === "world" ? CFG.world : CFG.brain;
     // Errors propagate: a denied log request must never look like empty history.
     const logs = await this.provider.getLogs({ address, fromBlock, toBlock });
+    const iface = source === "arcade" ? new ethers.Interface(ARCADE_ABI) : contract.interface;
     const events: Required<ChainEvent>[] = [];
     for (const log of logs) {
-      const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
+      const parsed = iface.parseLog({ topics: log.topics, data: log.data });
       if (parsed) events.push({ source, name: parsed.name, args: parsed.args, block: log.blockNumber, tx: log.transactionHash, index: log.index, id: `${source}:${log.transactionHash}:${log.index}` });
     }
     return events.sort((a, b) => a.block - b.block || a.index - b.index);

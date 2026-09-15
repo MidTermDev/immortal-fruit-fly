@@ -1,8 +1,8 @@
 import Link from "next/link";
 
 const NAV = [
-  { h: "Start", items: [["/docs/", "Overview"], ["/docs/vision/", "The vision"], ["/docs/play/", "How to play"]] },
-  { h: "Under the hood", items: [["/docs/how-it-works/", "How the brain runs on-chain"], ["/docs/contracts/", "Contracts & addresses"], ["/docs/circuit/", "The circuit, neuron by neuron"]] },
+  { h: "Start", items: [["/docs/", "Overview"], ["/docs/vision/", "The vision"], ["/docs/play/", "Watch & feed"]] },
+  { h: "Under the hood", items: [["/docs/how-it-works/", "How the brains run"], ["/docs/contracts/", "Contracts & addresses"], ["/docs/circuit/", "The circuit, neuron by neuron"]] },
   { h: "Where it goes", items: [["/docs/roadmap/", "Roadmap"], ["/docs/trend/", "The fly-brain trend"], ["/docs/science/", "Science & sources"]] },
 ];
 

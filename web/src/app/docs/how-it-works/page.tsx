@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
 import DocsShell from "@/components/DocsShell";
 import params from "@/data/params.json";
-export const metadata: Metadata = { title: "How the brain runs on-chain" };
+export const metadata: Metadata = { title: "How the brains run" };
 
 export default function Page() {
-  const p = params as any;
+  const p = params;
   return (
     <DocsShell current="/docs/how-it-works/">
       <h1>How it works</h1>
-      <p className="lede">Two brains. The whole connectome runs on a server in the published whole-brain model, embodied in a world, and is anchored to BNB Smart Chain by hashes and fed by burns. A 155-neuron core runs entirely inside a contract. This page covers both.</p>
+      <p className="lede">Three integrations share connectome data: a whole-brain arena, an on-chain compass core, and a separate whole-brain DOOM player. Their state, feeding and evidence are distinct.</p>
 
       <h2>Part 1 · The whole brain</h2>
       <h3>The model</h3>
       <p>All 139,248 neurons of FlyWire release 783 and the 2,700,429 connections with at least five synapses (34.2 M synapses in total), as leaky integrate-and-fire units with the parameters of Shiu et al. 2024 (<i>Nature</i> 634:210), the model every whole-brain demo of the last year uses: resting and reset potential −52 mV, threshold −45 mV, membrane time constant 20 ms, synaptic time constant 5 ms, refractory period 2.2 ms, synaptic delay 1.8 ms, and 0.275 mV of drive per synapse, negative when the presynaptic neuron is predicted GABAergic or glutamatergic. Time step 0.1 ms. Sensory neurons are driven as Poisson spike sources.</p>
-      <p>The kernel is event-driven and compiled (Numba): only neurons that spike touch their outgoing synapses. On 16 CPU cores the whole brain runs at 1.0–1.2× real time. The random stream is hashed from the step number and the neuron index, so a run is reproducible bit for bit from any snapshot.</p>
+      <p>The kernel is event-driven and compiled with Numba: only neurons that spike traverse their outgoing synapses. Its random stream is derived from the step number and neuron index. The live server reports its simulation speed; actual throughput depends on the host and workload. Reproducing a run also requires its starting state, sensory inputs and integration timing.</p>
       <h3>Senses</h3>
       <table className="data"><thead><tr><th>Sense</th><th>Real neurons driven</th><th>Driven by</th></tr></thead><tbody>
         <tr><td>Smell</td><td>ORNs of the fruit-responsive glomeruli DM1, DM4, VA2, DM2, VM2, DP1m (Or42b, Or59b, Or92a, Or22a, Or43b …), split by antenna; all other ORNs at 2 Hz</td><td>Gaussian odor plumes of the food items (σ 30 body lengths). Bilateral contrast is sharpened before the antennae (gain 8, clipped) because a smooth plume is far gentler than the filaments and head-casting a real fly uses.</td></tr>
@@ -27,9 +27,12 @@ export default function Page() {
         <li><strong>Walking.</strong> Speed follows the surge-and-cast program measured in walking flies by Álvarez-Salvado et al. 2018: rising odor → surge (4.5 body lengths/s, straight), falling odor → cast (slow, sustained turning in the direction the DNs favour), otherwise walk at 3. DNp09 adds forward drive; MDN subtracts (backward walking).</li>
         <li><strong>Jumping.</strong> A spike in DNp01, the giant fiber, is an escape jump of 12 body lengths away from the predator.</li>
       </ul>
-      <div className="callout"><b>What is and is not the connectome.</b> The neurons, their wiring, their transmitters and the whole-brain dynamics are the connectome. The mapping from world to sensory rates, the contrast sharpening, the adaptive baselines and the surge-and-cast speed rule are the embodiment layer, chosen from the literature and documented here. Without a sharpening step the fly does not chemotax: bilateral olfactory differences in the real animal are small, and both antennae project to both antennal lobes, so single descending neurons carry the gradient only when one antenna is nearly silent. We measured this before choosing the readout.</div>
+      <div className="callout"><b>Data and model choices.</b> The connectome supplies neurons, wiring and predicted transmitters. The neuron equations, sensory drive, contrast sharpening, adaptive baselines and movement rules are modelling choices. The frontend displays the resulting observations; it does not establish that the model reproduces a living fly&apos;s full behavior.</div>
       <h3>Metabolism and the chain</h3>
-      <p>One simulated second costs one second of energy. Eating restores it. Every ten minutes the server hashes the complete brain state, saves the snapshot, and calls <code>FlyWorld.checkpoint()</code> on BNB Smart Chain with the hash, position, energy and spike count. Food exists only through <code>FlyWorld.placeFood()</code>: the server reads the event and puts the food into the arena. At zero energy the server reports the death with a final hash; <code>resurrect()</code> burns $FLY and the same brain is restored from that snapshot. To verify a checkpoint, download its snapshot, run <code>brain/world.py</code> with the same food placements, and compare the next checkpoint&apos;s hash.</p>
+      <p>One simulated second consumes one unit of energy. A <code>FlyWorld.placeFood()</code> transaction burns FLY and records a food placement; the server reads that event and adds food to the arena. Placement is separate from consumption. The current feeding page places food at the arena center, and energy increases when it is eaten.</p>
+      <p>The server defaults to a checkpoint every ten minutes, saving a snapshot and reporting a hash, position, energy and spike count through <code>FlyWorld.checkpoint()</code>. It reports death when energy reaches zero. A confirmed <code>resurrect()</code> transaction records starting energy for the server to apply. These actions affect the arena instance, not the separate DOOM process.</p>
+      <h3>What the hash covers</h3>
+      <p>The current <code>WholeBrain.state_hash()</code> hashes <code>v</code>, <code>g</code>, <code>ring</code> and the simulation step <code>t</code>. It does not hash every field saved in the snapshot: refractory timers, counters and world state are outside that digest. Matching this hash checks those covered fields; it is not a complete simulation proof. The contract records the operator&apos;s report without executing or validating the whole-brain model.</p>
 
       <h2>Part 2 · The on-chain core</h2>
       <p>Integer leaky-integrate-and-fire neurons, synchronous spikes, deterministic noise, packed storage. Everything the EVM can do exactly, and nothing it cannot.</p>
@@ -61,7 +64,7 @@ if (v >= THRESH) { v = RESET; spike }    // fire
       <p>These were found by a search over 12,000 candidates scored on four trajectories: does a cue create a bump at the right wedge, does the bump persist for 128 free steps, does left PEN drive rotate it, does it survive, does a Δ7 shock collapse it. The calibration script and its report are in <code>sim/</code>.</p>
 
       <h2>Noise without an oracle</h2>
-      <p>Real neurons are noisy. A contract must be deterministic. So noise is <code>keccak256(stepNumber)</code>, re-hashed every 32 neurons, one signed byte per neuron. No block hash, no timestamp. Anyone can replay the brain&apos;s entire life from its events and get the same bits.</p>
+      <p>Contract noise is <code>keccak256(stepNumber)</code>, re-hashed every 32 neurons, one signed byte per neuron. It uses neither block hash nor timestamp. Replay must preserve transaction order and exact tick batch sizes: bias and movement update at the end of each batch.</p>
 
       <h2>The engram</h2>
       <p>At the end of every tick, a neuron that fired in at least one eighth of the steps gains one unit of bias; a neuron that never fired loses one. Bias is bounded at ±24 and multiplied by <code>gBias</code> into the membrane potential. It is slow, permanent, and survives death. It is the fly&apos;s memory of its habits.</p>
@@ -77,10 +80,25 @@ if (v >= THRESH) { v = RESET; spike }    // fire
       </ul>
 
       <h2>Gas</h2>
-      <p>The inner loop is hand-written Yul. Measured on the live circuit: about 25k gas per step for the 155 neurons, plus roughly 70 gas per synapse event. A 32-step tick with an active bump costs 4.4–7M gas; a strong turn stimulus (many PEN and EPG spikes) up to 12M. BSC&apos;s 0.05 gwei makes that 0.0002–0.0006 BNB per tick.</p>
+      <p>The inner loop is hand-written Yul. Measured on the live circuit: about 25k gas per step for the 155 neurons, plus roughly 70 gas per synapse event. A 32-step tick with an active bump costs 4.4–7M gas; a strong turn stimulus (many PEN and EPG spikes) up to 12M. Actual BNB fees depend on gas used and the current gas price.</p>
 
       <h2>Determinism, tested</h2>
       <p><code>test/Differential.t.sol</code> deploys the contract in Foundry, replays the exact transactions sent to the v1 mainnet fly, and asserts the spike counts, heading vectors and positions recorded in the mainnet events. The Python and TypeScript simulators pass the same replay.</p>
+
+      <h2>Part 3 · DOOM and FlyArcade</h2>
+      <p><code>brain/doom.py</code> starts its own whole-brain instance. Object bearings and size drive olfactory and looming inputs; descending-neuron readouts produce turn commands, and selected giant-fiber and take-off spikes trigger firing. The mapping from these neural signals to game buttons is application code. This process does not read FlyWorld food or use the arena&apos;s energy balance.</p>
+      <h3>Recorded decisions</h3>
+      <p>The operator submits a <code>FlyArcade.Decision</code> record at configurable intervals, 1.2 seconds by default. Several game actions may be represented by one record. The contract accepts the operator&apos;s values and hash; it holds no funds and does not verify game play.</p>
+      <table className="data"><thead><tr><th>Field</th><th>Meaning in the current runner</th></tr></thead><tbody>
+        <tr><td><code>turn</code></td><td>Accumulated, rounded turn commands since the previous sample. Positive means left, negative means right. This is not an absolute heading.</td></tr>
+        <tr><td><code>fire</code></td><td>At least one firing command occurred during the sampled interval.</td></tr>
+        <tr><td><code>spikes</code></td><td>The whole-brain cumulative spike counter modulo 2³², not spikes generated by this decision.</td></tr>
+        <tr><td><code>kills</code>, <code>health</code>, <code>gameTic</code></td><td>Reported game counters. Kills can reset when the runner starts another episode within the same contract session.</td></tr>
+        <tr><td><code>brainHash</code>, <code>brainStep</code></td><td>Captured when the queued chain job is processed. They can be later than the sampled action and game counters.</td></tr>
+      </tbody></table>
+      <h3>What the frontend can show</h3>
+      <p>Contract records support a session timeline, reported turns and firing, game counters, hashes and transaction links. The current runner writes a local <code>doom_fly.mp4</code> and <code>run.json</code>; it provides no browser video stream or published per-decision brain snapshots. The arena&apos;s WebSocket stream is a different simulation and cannot stand in for DOOM observations.</p>
+      <p>The runner also sends cues to the 155-neuron core in separate transactions. Those core results are actual EVM executions, but the contracts contain no explicit link from a core tick to an Arcade decision or session. The frontend therefore treats them as separate records. An end-session event records the operator&apos;s end call; the current contract does not prevent later decisions for that session.</p>
     </DocsShell>
   );
 }

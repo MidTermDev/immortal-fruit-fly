@@ -1,28 +1,42 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import DocsShell from "@/components/DocsShell";
-import { CFG } from "@/lib/config";
-export const metadata: Metadata = { title: "How to play" };
+
+export const metadata: Metadata = { title: "Watch & feed" };
 
 export default function Page() {
   return (
     <DocsShell current="/docs/play/">
-      <h1>How to play</h1>
-      <p className="lede">Six actions. Each one touches real neurons. Each one is a transaction on BNB Smart Chain.</p>
-      <div className="callout"><b>You need:</b> a wallet on BNB Smart Chain (MetaMask, Rabby, Binance Wallet), a little BNB for gas, and <code>$FLY</code> for anything that feeds or pokes the fly. <a href={CFG.links.pancake + CFG.token}>Get $FLY on PancakeSwap</a>.</div>
-      <table className="data"><thead><tr><th>Action</th><th>What happens to the neurons</th><th>Cost</th></tr></thead><tbody>
-        <tr><td><code>tick(steps)</code></td><td>Runs the brain forward up to 64 steps. Leak, integrate, threshold, spike, propagate. The compass bump decides where the fly walks.</td><td>gas only (~7M for 32 steps)</td></tr>
-        <tr><td><code>feed(amount)</code></td><td>Adds <code>amount / 1 FLY</code> steps of energy. The fly burns one step per simulation step.</td><td>burned</td></tr>
-        <tr><td><code>stimulate(CUE, wedge, strength)</code></td><td>Injects current into the EPG neurons of one of 16 wedges (and half as much into its neighbours) for 64 steps. A landmark. The bump forms or jumps there.</td><td>100 FLY × strength, burned</td></tr>
-        <tr><td><code>stimulate(TURN_LEFT / TURN_RIGHT)</code></td><td>Drives the left- or right-hemisphere PEN neurons: angular-velocity input. The bump rotates, the heading changes.</td><td>100 FLY × strength, burned</td></tr>
-        <tr><td><code>stimulate(SHOCK)</code></td><td>Drives all 42 Δ7 neurons: global inhibition. The bump collapses. The fly stops walking until it recovers.</td><td>100 FLY × strength, burned</td></tr>
-        <tr><td><code>resurrect(extraFood)</code></td><td>Only when dead. Wakes the identical brain in a new body at the origin, with <code>extraFood</code> steps of energy. Generation + 1.</td><td>100,000 FLY + food, burned</td></tr>
-      </tbody></table>
-      <h2>Using the dashboard</h2>
-      <p>Choose a feeding amount, connect your wallet, then confirm the feed. For other interactions, choose an action and review its FLY cost. Expand the strength controls to adjust an interaction or the direction of a landmark. Wallet approval and transaction confirmation appear beside the controls.</p>
-      <h2>Reading the visual</h2>
-      <p>Fly view shows the latest confirmed position and a trail of positions received during this visit. Brain view shows the anatomy and the latest available neural state. Visual transitions smooth those updates; they do not run new simulation steps. If the connection is interrupted, the dashboard keeps the last state visible and pauses paid actions until it reconnects.</p>
-      <h2>Gas notes</h2>
-      <p>Public BSC RPCs cap gas estimation at 16.7M, so the site sets gas limits itself: 32-step ticks use up to 9M, stimuli with 16 follow-up steps up to 9M. A strong turn stimulus makes many neurons spike and costs more; that is real neural activity you are paying for.</p>
+      <h1>Watch &amp; feed</h1>
+      <p className="lede">Follow the fly, inspect its recorded executions, and help keep it alive.</p>
+
+      <h2>Watch</h2>
+      <p><Link href="/">Watch</Link> shows the circuit&apos;s latest confirmed state. The brain visualization shows its latest neural state; execution records show position and heading.</p>
+      <p>The <Link href="/world/">whole-brain world</Link> shows the simulator&apos;s live stream. Its movements and spikes arrive from the simulator; checkpoints are recorded separately on BNB Smart Chain. When a connection stops, the last received state remains visible.</p>
+
+      <h2>Decisions</h2>
+      <p><Link href="/decisions/">Decisions</Link> lets you inspect an execution: input events earlier in the same transaction, steps run, spikes, heading, and resulting position. Each record links to its transaction.</p>
+
+      <h2>Activity</h2>
+      <p><Link href="/activity/">Activity</Link> lists recent events from the circuit, world, and arcade contracts. Filter by contract or event type to find feeds, executions, checkpoints, and game decisions. The page shows the block window it has loaded.</p>
+
+      <h2>Arcade</h2>
+      <p><Link href="/arcade/">Arcade</Link> follows the whole brain playing DOOM. Choose a session, inspect its recorded turn and firing commands, and follow changes in reported health and kills. Each decision links to its transaction and recorded brain hash.</p>
+      <p>These are periodic reports from a separate brain simulation. Game video is not published by the current runner, and the contract does not execute the game or verify the brain computation.</p>
+
+      <h2>Feed the fly</h2>
+      <p>The Feed the fly link opens the circuit or arena feeding page. You need FLY and BNB for network fees.</p>
+      <p><Link href="/feed/">Circuit feeding</Link> adds energy directly. <Link href="/feed/world/">Whole-brain feeding</Link> places food at the arena center; energy is added when the fly eats it.</p>
+      <ol>
+        <li>Choose an amount and connect your wallet on BNB Smart Chain.</li>
+        <li>Review the FLY cost, then approve the allowance if your wallet requests it.</li>
+        <li>Confirm the feed transaction and wait for its confirmation.</li>
+      </ol>
+      <p>Both feeding pages offer revival when their contract records a death. Watching and inspecting records do not require a wallet.</p>
+      <p>Feeding the arena does not affect the separate DOOM run. From Arcade, the feeding link opens the on-chain circuit that the runner also cues.</p>
+
+      <h2>Contract reference</h2>
+      <p>The <Link href="/docs/contracts/">contract reference</Link> documents feeding, world food placement, simulation steps, stimuli, and resurrection, with their addresses and parameters.</p>
     </DocsShell>
   );
 }

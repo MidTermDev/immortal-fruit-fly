@@ -46,8 +46,8 @@ function renderDashboard(state) {
     cache.set(filename, record.exports);
     return record.exports;
   }
-  const Fly = load(path.join(sourceRoot, "components/Fly.tsx")).default;
-  return renderToStaticMarkup(createElement(Fly));
+  const CareDashboard = load(path.join(sourceRoot, "components/CareDashboard.tsx")).default;
+  return renderToStaticMarkup(createElement(CareDashboard));
 }
 
 function button(html, className) {
@@ -56,15 +56,13 @@ function button(html, className) {
   return { disabled: /\bdisabled(?:=|\s|$)/.test(found[1]), text: found[2].replace(/<[^>]*>/g, "") };
 }
 
-test("a dead fly offers revival and prevents stimulus/tick spending", () => {
+test("a dead fly offers revival with food and preserves wallet access", () => {
   const state = fixture();
   state.snapshot = { ...state.snapshot, alive: false, energy: 0, energyRaw: 0n };
   const html = renderDashboard(state);
   assert.match(html, /<h2>Revive the fly<\/h2>/);
   assert.equal(button(html, "feed-submit").disabled, false);
   assert.match(button(html, "feed-submit").text, /Revive the fly/);
-  assert.equal(button(html, "interaction-submit").disabled, true);
-  assert.equal(button(html, "advance-button").disabled, true);
   assert.match(html, /<summary class="wallet-button">/);
   assert.match(html, /101,000 FLY will be burned/);
 });
@@ -75,8 +73,6 @@ for (const connection of ["offline", "stale"]) {
     if (connection === "offline") state.snapshot = null;
     const html = renderDashboard(state);
     assert.equal(button(html, "feed-submit").disabled, true);
-    assert.equal(button(html, "interaction-submit").disabled, true);
-    assert.equal(button(html, "advance-button").disabled, true);
     assert.match(html, /<summary class="wallet-button">/);
     assert.match(html, />Retry<\/button>/);
   });
@@ -91,21 +87,16 @@ test("a disconnected visitor has an enabled connect action", () => {
   assert.match(button(html, "feed-submit").text, /Connect wallet/);
 });
 
-test("insufficient FLY blocks token spending but leaves gas-only advance available", () => {
+test("insufficient FLY blocks feeding", () => {
   const state = fixture();
   state.wallet = { ...state.wallet, balance: 0n };
   const html = renderDashboard(state);
   assert.equal(button(html, "feed-submit").disabled, true);
-  assert.equal(button(html, "interaction-submit").disabled, true);
-  assert.match(button(html, "interaction-submit").text, /Not enough FLY/);
-  assert.equal(button(html, "advance-button").disabled, false);
 });
 
 test("pending transactions block duplicate action submissions", () => {
   const html = renderDashboard(fixture({ busy: true, transaction: { phase: "pending", label: "Feed", message: "Waiting for confirmation…" } }));
   assert.equal(button(html, "feed-submit").disabled, true);
-  assert.equal(button(html, "interaction-submit").disabled, true);
-  assert.equal(button(html, "advance-button").disabled, true);
   assert.match(html, /Waiting for confirmation/);
 });
 
@@ -116,5 +107,13 @@ test("confirmed transactions expose the actual receipt link and release actions"
   assert.match(html, /Confirmed\./);
   assert.ok(html.includes(`href="https://bscscan.com/tx/${hash}"`));
   assert.equal(button(html, "feed-submit").disabled, false);
-  assert.equal(button(html, "interaction-submit").disabled, false);
+});
+
+test("feeding checks exact energy capacity at the uint64 boundary", () => {
+  const state = fixture();
+  const limit = (1n << 64n) - 1n;
+  state.snapshot = { ...state.snapshot, energyRaw: limit - 1000n, energy: Number(limit - 1000n) };
+  assert.equal(button(renderDashboard(state), "feed-submit").disabled, false);
+  state.snapshot.energyRaw = limit - 999n;
+  assert.equal(button(renderDashboard(state), "feed-submit").disabled, true);
 });
