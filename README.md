@@ -52,6 +52,8 @@
 | `FlyBrain` (the genesis fly) | [`0x32D28e97b50f5978eb51d7608492CC7221b01f63`](https://bscscan.com/address/0x32D28e97b50f5978eb51d7608492CC7221b01f63) |
 | circuit table (SSTORE2 data contract) | [`0x8191174505B6692139A3571Fa4767049acc92eEc`](https://bscscan.com/address/0x8191174505B6692139A3571Fa4767049acc92eEc) |
 
+Source verified on [Sourcify](https://repo.sourcify.dev/56/0x32D28e97b50f5978eb51d7608492CC7221b01f63) (exact match).
+
 Circuit table keccak256: `0xffbe0e7f28e1f0dd2cfaa01d1d221c502bf41c1fd519ebfe8d9b8203e7cedfc2`
 FlyWire connections file sha256: `24f960ae3e7d4f8cd30db3b62e99fb5179cc3d1e76d8c155bfb441e9737d3faf`
 
@@ -65,7 +67,9 @@ We put it on the blockchain.
 
 `FlyBrain.sol` runs the fly's **head-direction ring attractor**, the circuit the fly uses to know which way it is facing, as a spiking neural network directly in the EVM. The neurons are the real ones: 155 cells of type EPG, EPGt, PEG, PEN_a, PEN_b and Δ7, with 6,522 connections carrying 45,961 synapses, read straight out of the public [FlyWire](https://flywire.ai) connectome (release 783). Every FlyWire root ID is stored on-chain so anyone can check each neuron at [codex.flywire.ai](https://codex.flywire.ai).
 
-The compass bump forms, drifts, gets pushed around by stimuli, and its direction drives the fly's walk across an on-chain world. BNB Chain is fast and cheap enough (0.05 gwei) that one simulation step costs a fraction of a cent.
+The compass bump forms, drifts, gets pushed around by stimuli, and its direction drives the fly's walk across an on-chain world. BNB Chain is fast and cheap enough (0.05 gwei) that a 32-step tick of the whole circuit costs about 4M gas, roughly 0.0002 BNB.
+
+The simulation is deterministic and replayable: `sim/flysim.py` and `site/js/flysim.js` reproduce the contract bit for bit (the Foundry test `Differential.t.sol` replays the real mainnet transactions of the genesis fly and checks every spike count and heading).
 
 ## Immortality
 
@@ -146,7 +150,9 @@ forge script script/Deploy.s.sol --rpc-url bsc --broadcast --verify -vvvv
 - [x] parameter calibration (stable bump, turns with PEN drive, collapses under Δ7 shock)
 - [x] 17 Foundry tests
 - [x] BSC mainnet: genesis fly deployed
-- [ ] website / dapp
-- [ ] keeper bot
+- [x] website / dapp: https://midtermdev.github.io/immortal-fruit-fly/
+- [x] source verified (Sourcify exact match)
+- [ ] v2 brain: persistent synaptic input, robust calibration, assembly inner loop (in progress)
+- [ ] keeper bot running
 
 Not financial advice. It is a fly.
