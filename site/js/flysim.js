@@ -76,6 +76,7 @@
       if (!this.alive) return null;
       const stimActive = this.stimChannel !== 0 && this.step < this.stimUntil;
       const stimI = stimActive ? this.buildStim() : null;
+      this.inp.fill(0); // as on-chain: synaptic input is transient, cleared at each tick
       const spk = new Array(N).fill(0), bins = new Array(WEDGES).fill(0);
       let hx = 0, hy = 0, tickSpikes = 0, ran = 0;
       const s0 = this.step;

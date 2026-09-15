@@ -7,7 +7,7 @@
     void main() {
       vColor = aColor; vGlow = aGlow;
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = aSize * (260.0 / -mv.z) * (1.0 + vGlow * 1.2);
+      gl_PointSize = aSize * (6.5 / -mv.z) * (1.0 + vGlow * 1.2);
       gl_Position = projectionMatrix * mv;
     }`;
   const FRAG = `
@@ -17,7 +17,7 @@
       if (d > 0.5) discard;
       float a = smoothstep(0.5, 0.05, d);
       vec3 col = vColor * (1.0 + vGlow * 2.5);
-      gl_FragColor = vec4(col, a * (0.55 + vGlow * 0.45));
+      gl_FragColor = vec4(col, a * (0.45 + vGlow * 0.55));
     }`;
 
   function decodePoints(b64) {
@@ -50,7 +50,7 @@
       this.scene = new THREE.Scene();
       this.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 100);
       this.group = new THREE.Group(); this.scene.add(this.group);
-      this.rotY = 0.35; this.rotX = 0.08; this.targetRotY = 0.35; this.targetRotX = 0.08; this.auto = true;
+      this.rotY = 0.2; this.rotX = 0.35; this.targetRotY = 0.2; this.targetRotX = 0.35; this.auto = true;
       this.zoom = 1;
 
       const pts = decodePoints(pointsB64);
@@ -65,9 +65,9 @@
         const p = toLocal(pts.pos[3 * i], pts.pos[3 * i + 1], pts.pos[3 * i + 2]);
         pos.set(p, 3 * i);
         const c = CLASS_COLORS[pts.cls[i]] || CLASS_COLORS[1];
-        const dim = pts.cls[i] === 0 ? 0.32 : 0.55;
+        const dim = pts.cls[i] === 0 ? 0.55 : 0.85;
         col[3 * i] = c[0] * dim; col[3 * i + 1] = c[1] * dim; col[3 * i + 2] = c[2] * dim;
-        size[i] = pts.cls[i] === 0 ? 0.9 : 1.25;
+        size[i] = pts.cls[i] === 0 ? 0.55 : 0.8;
       }
       this.bg = this._points(pos, col, size, glow, 0.0);
       this.group.add(this.bg);
@@ -78,7 +78,7 @@
       ringNeurons.forEach((nr, i) => {
         const p = toLocal(nr.pos_nm[0], nr.pos_nm[1], nr.pos_nm[2]);
         rp.set(p, 3 * i);
-        const c = TYPE_COLORS[nr.type]; rc.set(c, 3 * i); rs[i] = 3.2; rg[i] = 0;
+        const c = TYPE_COLORS[nr.type]; rc.set(c, 3 * i); rs[i] = 2.6; rg[i] = 0.25;
       });
       this.ring = this._points(rp, rc, rs, rg, 0.0);
       this.group.add(this.ring);
@@ -118,8 +118,9 @@
       if (this.auto && !this.reduced) this.targetRotY += dt * 0.08;
       this.rotY += (this.targetRotY - this.rotY) * 0.08; this.rotX += (this.targetRotX - this.rotX) * 0.08;
       this.group.rotation.set(this.rotX, this.rotY, 0);
-      const dist = 1.75 / this.zoom;
-      this.camera.position.set(0, 0.02, dist); this.camera.lookAt(0, 0, 0);
+      const dist = 1.25 / this.zoom;
+      this.camera.position.set(0, -0.16, dist); this.camera.lookAt(0, -0.16, 0);
+      this.group.position.set(0, 0.06, 0);
       const g = this.ringGlow; const decay = Math.exp(-dt * 4.5);
       for (let i = 0; i < g.length; i++) g[i] *= decay;
       this.ring.geometry.attributes.aGlow.needsUpdate = true;

@@ -78,8 +78,12 @@
     }
     async recentEvents(blocks = 20000) {
       const to = await this.provider.getBlockNumber(); const from = Math.max(0, to - blocks);
-      const logs = await this.brain.queryFilter('*', from, to);
-      return logs.map(l => ({ name: l.fragment?.name, args: l.args, block: l.blockNumber, tx: l.transactionHash })).reverse();
+      const raw = [];
+      for (let b = to; b > from; b -= 2000) { try { raw.push(...await this.provider.getLogs({ address: this.cfg.brain, fromBlock: Math.max(from, b - 1999), toBlock: b })); } catch (e) { console.warn('getLogs chunk failed', e); } }
+      raw.sort((x, y) => x.blockNumber - y.blockNumber || x.index - y.index);
+      const out = [];
+      for (const l of raw) { try { const p = this.brain.interface.parseLog({ topics: l.topics, data: l.data }); if (p) out.push({ name: p.name, args: p.args, block: l.blockNumber, tx: l.transactionHash }); } catch (e) {} }
+      return out.reverse();
     }
     // ---- wallet
     async connectWallet() {

@@ -99,18 +99,19 @@
     const alive = sim.alive;
     const st = $('status'); st.textContent = mode === 'chain' ? (alive ? 'alive · on-chain' : 'dead · on-chain') : (alive ? 'alive · preview' : 'dead · preview');
     st.className = 'status' + (alive ? '' : ' dead') + (mode === 'preview' ? ' preview' : '');
-    $('gen').textContent = sim.generation;
-    $('step').textContent = fmt(sim.step);
-    $('energy').textContent = fmt(sim.energy);
-    $('spikes').textContent = fmt(sim.totalSpikes + (chainState ? chainState.totalSpikes - (chainState._simSpikesAtLoad || 0) : 0));
-    $('pos').textContent = `${(sim.posX / 256).toFixed(1)}, ${(sim.posY / 256).toFixed(1)}`;
+    const src = mode === 'chain' && chainState ? chainState : sim;   // the label reports what is on-chain; the animation runs ahead
+    $('gen').textContent = src.generation;
+    $('step').textContent = fmt(src.step) + (mode === 'chain' ? ` (+${fmt(sim.step - chainState.step)} preview)` : '');
+    $('energy').textContent = fmt(src.energy);
+    $('spikes').textContent = fmt(mode === 'chain' ? chainState.totalSpikes : sim.totalSpikes);
+    $('pos').textContent = `${(src.posX / 256).toFixed(1)}, ${(src.posY / 256).toFixed(1)}`;
     $('heading').textContent = `${Math.round(((headAngle * 180 / Math.PI) + 360) % 360)}°`;
     const maxE = Math.max(1, Number($('energy').dataset.max || 1000000), sim.energy);
     $('energy-bar').style.width = Math.min(100, 100 * sim.energy / maxE) + '%';
     const stim = sim.stimChannel && sim.step < sim.stimUntil ? ['', 'cue', 'turn left', 'turn right', 'shock'][sim.stimChannel] + (sim.stimChannel === 1 ? ` @${sim.stimParam}` : '') + ` ×${sim.stimStrength}` : 'none';
     $('stim').textContent = stim;
     $('resurrect-card').hidden = alive;
-    if (chainState) { $('burned').textContent = fmtTok(chainState.totalBurned); $('block').textContent = fmt(chainState.block); $('gen-count').textContent = chainState.lineageLength; }
+    if (chainState) { $('burned').textContent = fmtTok(chainState.totalBurned); $('block').textContent = fmt(chainState.block); $('gen-count').textContent = chainState.lineageLength + 1; }
   }
 
   // ---------------------------------------------------------------- loop
@@ -189,7 +190,7 @@
   function updateCosts() {
     if (!chain || !chain.prices) return;
     $('cost-stim').textContent = `${fmtTok(chain.prices.stimPrice * BigInt(strength()))} FLY`;
-    $('cost-feed').textContent = `1 FLY = ${fmtTok(ethers.parseEther('1') / chain.prices.tokensPerStep)} step`;
+    $('cost-feed').textContent = `${fmtTok(chain.prices.tokensPerStep)} FLY = 1 step`;
     $('cost-res').textContent = `${fmtTok(chain.prices.resurrectPrice)} FLY + food`;
   }
   $('btn-connect').onclick = async () => {
