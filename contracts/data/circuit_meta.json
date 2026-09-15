@@ -1,0 +1,17 @@
+{
+ "dataset": "FlyWire whole-brain connectome, release 783 (Dorkenwald et al., Nature 2024; Schlegel et al., Nature 2024)",
+ "connections_file": "proofread_connections_783.feather",
+ "connections_file_sha256": "24f960ae3e7d4f8cd30db3b62e99fb5179cc3d1e76d8c155bfb441e9737d3faf",
+ "connections_doi": "10.5281/zenodo.10676866",
+ "annotations_file": "flyconnectome/flywire_annotations Supplemental_file1_neuron_annotations.tsv",
+ "circuit": "head-direction ring attractor: EPG, EPGt, PEG, PEN_a, PEN_b, Delta7",
+ "N": 155,
+ "S": 6522,
+ "synapse_threshold": 1,
+ "total_synapses_in_circuit": 45961,
+ "synapses_kept": 45961,
+ "table_bytes": 15065,
+ "table_keccak256": "0x2bac7f433960128ed026c680bd3cf2405b762c8fa82b750172e1f80644c7a61d",
+ "ring_geometry": "Laplacian eigenmap of symmetrised two-hop excitatory EPG->{PEG,PEN}->EPG connectivity; wedges = 16 equal angular bins",
+ "wedges": 16
+}

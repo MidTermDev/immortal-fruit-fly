@@ -1,0 +1,29 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# large datasets (download with sim/fetch_data.sh)
+data/*.feather
+data/*.tsv
+data/dl.log
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/lib/
+contracts/broadcast/**/dry-run/
+contracts/.env
+
+# node
+node_modules/
+.env
+.env.*
+!.env.example
+
+# misc
+.DS_Store
+image.png
+data/syn.part*
+data/dl_syn.log
+data/dl_synapses.sh
