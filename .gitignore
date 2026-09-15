@@ -29,3 +29,5 @@ data/dl_syn.log
 data/dl_synapses.sh
 deploy.txt
 *.key
+keeper/keeper.log
+keeper/node_modules/

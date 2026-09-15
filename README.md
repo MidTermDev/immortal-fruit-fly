@@ -49,8 +49,9 @@
 | | Address |
 |---|---|
 | `$FLY` token (Immortal Fruit Flies) | [`0x23791aa3b031659b593cf141a2bc76b0ad657777`](https://bscscan.com/token/0x23791aa3b031659b593cf141a2bc76b0ad657777) |
-| `FlyBrain` (the genesis fly) | [`0x32D28e97b50f5978eb51d7608492CC7221b01f63`](https://bscscan.com/address/0x32D28e97b50f5978eb51d7608492CC7221b01f63) |
-| circuit table (SSTORE2 data contract) | [`0x8191174505B6692139A3571Fa4767049acc92eEc`](https://bscscan.com/address/0x8191174505B6692139A3571Fa4767049acc92eEc) |
+| `FlyBrain` v2 (the genesis fly, live) | [`0xee80f8cB5309C572343c38b5D717283BBBb517c5`](https://bscscan.com/address/0xee80f8cB5309C572343c38b5D717283BBBb517c5) |
+| circuit table v2 (SSTORE2 data contract) | [`0x2eE3C5168CD3F60E87693716E660470011EA9C7e`](https://bscscan.com/address/0x2eE3C5168CD3F60E87693716E660470011EA9C7e) |
+| `FlyBrain` v1 (first fly, retired: dropped pending input between ticks) | [`0x32D28e97b50f5978eb51d7608492CC7221b01f63`](https://bscscan.com/address/0x32D28e97b50f5978eb51d7608492CC7221b01f63) |
 
 Source verified on [Sourcify](https://repo.sourcify.dev/56/0x32D28e97b50f5978eb51d7608492CC7221b01f63) (exact match).
 
@@ -152,7 +153,7 @@ forge script script/Deploy.s.sol --rpc-url bsc --broadcast --verify -vvvv
 - [x] BSC mainnet: genesis fly deployed
 - [x] website / dapp: https://midtermdev.github.io/immortal-fruit-fly/
 - [x] source verified (Sourcify exact match)
-- [ ] v2 brain: persistent synaptic input, robust calibration, assembly inner loop (in progress)
-- [ ] keeper bot running
+- [x] v2 brain: persistent synaptic input, calibration robust across trajectories, assembly inner loop
+- [x] keeper bot running (32 steps every 10 minutes)
 
 Not financial advice. It is a fly.

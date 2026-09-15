@@ -6,7 +6,7 @@ window.FLY_CONFIG = {
   rpc: ['https://bsc-rpc.publicnode.com', 'https://bsc-dataseed.bnbchain.org', 'https://bsc-dataseed1.binance.org'],
   explorer: 'https://bscscan.com',
   token: "0x23791aa3b031659b593cf141a2bc76b0ad657777",   // Immortal Fruit Flies ($FLY)
-  brain: "0x32D28e97b50f5978eb51d7608492CC7221b01f63",   // FlyBrain (genesis fly)
+  brain: "0xee80f8cB5309C572343c38b5D717283BBBb517c5",   // FlyBrain v2 (genesis fly, persistent input)
   links: {
     x: 'https://x.com/',
     telegram: 'https://t.me/',
