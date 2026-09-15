@@ -1,0 +1,1 @@
+{ "name": "fly-keeper", "private": true, "type": "module", "dependencies": { "ethers": "^6.15.0" }, "scripts": { "start": "node keeper.mjs" } }

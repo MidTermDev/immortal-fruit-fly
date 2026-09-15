@@ -1,0 +1,221 @@
+<title>Immortal Fruit Fly</title>
+<meta name="description" content="A real fruit-fly neural circuit from the FlyWire connectome, alive on BNB Smart Chain. Feed it, poke it, watch it think.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="css/site.css">
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="glyph">(@@)</span> IMMORTAL FRUIT FLY</a>
+    <nav class="nav"><a href="#brain">Brain</a><a href="#immortality">Immortality</a><a href="#play">Play</a><a href="#token">Token</a><a href="#provenance">Provenance</a></nav>
+    <span class="spacer"></span>
+    <span id="wallet-bal" class="mono muted" hidden></span>
+    <button id="btn-connect" class="btn small">Connect wallet</button>
+    <a class="btn small gold" data-buy href="#" target="_blank" rel="noopener">Buy $FLY</a>
+  </div>
+</header>
+
+<section class="hero" id="top">
+  <canvas id="brain" class="hero-canvas" aria-label="The fruit fly brain, 139,248 neurons, with the 155 on-chain neurons lit by their spikes"></canvas>
+  <div class="wrap hero-grid">
+    <aside class="panel" aria-label="Specimen label">
+      <div class="label-head"><span class="name">Specimen 001</span><span id="status" class="status">alive</span></div>
+      <dl class="kv">
+        <dt>species</dt><dd>Drosophila melanogaster</dd>
+        <dt>circuit</dt><dd>head-direction ring</dd>
+        <dt>neurons on-chain</dt><dd>155</dd>
+        <dt>connections</dt><dd>6,522</dd>
+        <dt>generation</dt><dd id="gen">0</dd>
+        <dt>step</dt><dd id="step" class="big">0</dd>
+        <dt>energy (steps left)</dt><dd id="energy" data-max="1000000">0</dd>
+      </dl>
+      <div class="energybar"><i id="energy-bar"></i></div>
+      <dl class="kv" style="margin-top:12px">
+        <dt>spikes</dt><dd id="spikes">0</dd>
+        <dt>position</dt><dd id="pos">0, 0</dd>
+        <dt>heading</dt><dd id="heading">0°</dd>
+        <dt>stimulus</dt><dd id="stim">none</dd>
+        <dt>$FLY burned</dt><dd id="burned">—</dd>
+        <dt>block</dt><dd id="block">—</dd>
+      </dl>
+      <div class="addr">FlyBrain <span id="addr-brain"></span></div>
+      <div class="addr">$FLY <span id="addr-token"></span></div>
+    </aside>
+
+    <div class="hero-mid">
+      <p class="eyebrow">FlyWire connectome · release 783 · BNB Smart Chain</p>
+      <h1 class="hero-title">The fly brain<br><span class="line2">lives on-chain.</span></h1>
+      <p class="hero-sub">155 real neurons from a fruit fly's compass circuit, simulated spike by spike inside a smart contract. It walks. It remembers. When it dies, the brain is frozen on-chain and can be woken again.</p>
+      <div class="hero-cta">
+        <a class="btn primary" data-buy href="#" target="_blank" rel="noopener">Buy $FLY</a>
+        <a class="btn" href="#play">Feed the fly</a>
+        <a class="btn ghost" data-chart href="#" target="_blank" rel="noopener">Chart ↗</a>
+      </div>
+      <div class="scalebar"><i></i> 100 µm · drag to rotate · scroll to zoom</div>
+    </div>
+
+    <aside class="panel compass-wrap" aria-label="Compass">
+      <div class="label-head"><span class="name">Compass</span><span class="eyebrow">EPG bump</span></div>
+      <canvas id="compass" class="compass" aria-label="16-wedge compass showing the head-direction bump"></canvas>
+      <div class="compass-foot"><span>click a wedge to aim a cue</span><span>outer ring = memory</span></div>
+      <div class="legend"><span style="--c:#f5b840">EPG / PEG</span><span style="--c:#ff4d2e">PEN</span><span style="--c:#4fc3f7">Δ7 (inhibitory)</span></div>
+    </aside>
+  </div>
+</section>
+
+<section class="deck" id="play">
+  <div class="wrap">
+    <div class="card" style="grid-column: 1 / -1; padding: 0; border: 0; background: none">
+      <div id="mode-banner" class="mode-banner"><span>◐</span><span id="mode-banner-text"></span></div>
+    </div>
+    <div class="card">
+      <h3>Feed <span class="cost" id="cost-feed">1 FLY = 1 step</span></h3>
+      <p class="note">Every simulation step burns one unit of energy. Feeding sends $FLY to the dead address and gives the fly time to live.</p>
+      <div class="row"><input id="feed-amount" class="input" type="number" min="1" value="1000" aria-label="Amount of FLY to feed"><button id="btn-feed" class="btn gold">Feed</button></div>
+      <h3 style="margin-top:6px">Walk</h3>
+      <canvas id="walk" class="walk" aria-label="Map of the fly's walk"></canvas>
+      <div class="row"><button id="btn-tick" class="btn small">Run 32 steps (gas only)</button><span class="note">Anyone can tick the brain forward.</span></div>
+    </div>
+    <div class="card">
+      <h3>Stimulate <span class="cost" id="cost-stim">100 FLY × strength</span></h3>
+      <p class="note">Inject current into a group of real neurons for 64 steps, then run 32 steps so you see the reaction.</p>
+      <div class="row"><label class="note" for="strength">strength</label><input id="strength" type="range" min="1" max="16" value="4" style="flex:1"><span id="strength-out" class="mono">4</span></div>
+      <div class="row"><label class="note" for="cue-wedge">cue wedge</label><input id="cue-wedge" type="range" min="0" max="15" value="4" style="flex:1"><span id="cue-wedge-out" class="mono">4</span></div>
+      <div class="row"><button id="btn-cue" class="btn">Flash cue</button><button id="btn-left" class="btn">↺ Turn left</button><button id="btn-right" class="btn">↻ Turn right</button><button id="btn-shock" class="btn" style="border-color:#4fc3f7;color:#4fc3f7">⚡ Shock</button></div>
+      <p class="note"><b class="gold">Cue</b> drives the EPG neurons of one wedge (a landmark). <b class="eye">Turn</b> drives the left or right PEN neurons (angular velocity). <b class="cyan">Shock</b> drives every Δ7 neuron: global inhibition, the bump collapses.</p>
+    </div>
+    <div class="card">
+      <h3>Interaction history <span class="cost" id="gen-count-wrap">lives: <span id="gen-count">1</span></span></h3>
+      <div id="log" class="log"><div><span>—</span><b>connecting…</b></div></div>
+      <div id="resurrect-card" hidden>
+        <h3 style="margin-top:8px">Resurrect <span class="cost" id="cost-res">100,000 FLY + food</span></h3>
+        <p class="note">The fly is dead. Its brain is frozen exactly as it was. Bring it back with a new body.</p>
+        <div class="row"><input id="resurrect-food" class="input" type="number" min="0" value="10000" aria-label="Extra food"><button id="btn-resurrect" class="btn primary">Resurrect</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="brain">
+  <div class="wrap">
+    <div class="sec-head">
+      <div><p class="eyebrow">What is actually running on-chain</p><h2>The fly's compass, neuron for neuron.</h2></div>
+      <p>Inside the ellipsoid body of every fruit fly, about fifty EPG neurons hold a single bump of activity that points where the fly is facing. PEN neurons push the bump around when the fly turns. Δ7 neurons inhibit everything else so there is only ever one bump. PEG neurons keep it alive. <span class="gold">FlyBrain.sol</span> runs exactly these cells, with the synapse counts FlyWire measured between them, as integer leaky-integrate-and-fire neurons in the EVM. Every membrane potential is a storage slot.</p>
+    </div>
+    <div class="circuit-grid">
+      <svg class="circuit-svg" viewBox="0 0 560 420" role="img" aria-label="Diagram of the ring attractor: EPG ring in the ellipsoid body, PEN and PEG in the protocerebral bridge, Delta7 inhibition">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8f94a3"/></marker></defs>
+        <circle cx="200" cy="230" r="120" fill="none" stroke="#f5b840" stroke-opacity="0.35" stroke-width="26"/>
+        <g fill="#f5b840">
+          <circle cx="320" cy="230" r="7"/><circle cx="311" cy="276" r="7"/><circle cx="285" cy="315" r="7"/><circle cx="246" cy="341" r="7"/><circle cx="200" cy="350" r="7"/><circle cx="154" cy="341" r="7"/><circle cx="115" cy="315" r="7"/><circle cx="89" cy="276" r="7"/><circle cx="80" cy="230" r="7"/><circle cx="89" cy="184" r="7"/><circle cx="115" cy="145" r="7"/><circle cx="154" cy="119" r="7"/><circle cx="200" cy="110" r="7"/><circle cx="246" cy="119" r="7"/><circle cx="285" cy="145" r="7"/><circle cx="311" cy="184" r="7"/>
+        </g>
+        <circle cx="311" cy="184" r="16" fill="#ff4d2e" fill-opacity="0.35"/><circle cx="320" cy="230" r="22" fill="#ff4d2e" fill-opacity="0.55"/><circle cx="311" cy="276" r="16" fill="#ff4d2e" fill-opacity="0.35"/>
+        <text x="200" y="236" text-anchor="middle" fill="#e8e4da" font-family="Syne, sans-serif" font-weight="800" font-size="16">ELLIPSOID BODY</text>
+        <text x="200" y="256" text-anchor="middle" fill="#8f94a3" font-family="JetBrains Mono, monospace" font-size="11">51 EPG · 16 wedges · the bump</text>
+        <rect x="380" y="60" width="150" height="46" rx="4" fill="#151a29" stroke="#f5b840" stroke-opacity="0.6"/>
+        <text x="455" y="80" text-anchor="middle" fill="#f5b840" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700">PEG ×20</text>
+        <text x="455" y="96" text-anchor="middle" fill="#8f94a3" font-family="JetBrains Mono, monospace" font-size="10">same wedge · sustain</text>
+        <rect x="380" y="130" width="150" height="46" rx="4" fill="#151a29" stroke="#ff4d2e" stroke-opacity="0.7"/>
+        <text x="455" y="150" text-anchor="middle" fill="#ff4d2e" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700">PEN ×42</text>
+        <text x="455" y="166" text-anchor="middle" fill="#8f94a3" font-family="JetBrains Mono, monospace" font-size="10">wedge ±1 · rotate</text>
+        <rect x="380" y="300" width="150" height="46" rx="4" fill="#151a29" stroke="#4fc3f7" stroke-opacity="0.7"/>
+        <text x="455" y="320" text-anchor="middle" fill="#4fc3f7" font-family="JetBrains Mono, monospace" font-size="12" font-weight="700">Δ7 ×42</text>
+        <text x="455" y="336" text-anchor="middle" fill="#8f94a3" font-family="JetBrains Mono, monospace" font-size="10">global inhibition</text>
+        <g stroke="#8f94a3" stroke-width="1.5" fill="none" marker-end="url(#ah)">
+          <path d="M300 120 C 340 95, 360 88, 378 84"/><path d="M325 190 C 350 175, 365 160, 378 153"/><path d="M330 300 C 350 310, 365 318, 378 323"/>
+          <path d="M380 92 C 350 110, 335 130, 327 165" stroke="#f5b840"/><path d="M380 160 C 355 200, 350 215, 344 225" stroke="#ff4d2e"/><path d="M380 315 C 340 280, 330 260, 322 245" stroke="#4fc3f7"/>
+        </g>
+        <text x="20" y="30" fill="#8f94a3" font-family="JetBrains Mono, monospace" font-size="11">PROTOCEREBRAL BRIDGE →</text>
+        <text x="20" y="400" fill="#5d6270" font-family="JetBrains Mono, monospace" font-size="10">weights = FlyWire synapse counts, 45,961 synapses total</text>
+      </svg>
+      <div class="celltypes">
+        <div><b class="gold">EPG</b><span class="n">47+4</span><p>Compass neurons. Each reads one wedge of the ring. Their spikes are the fly's heading: the contract decodes them into a direction and walks.</p></div>
+        <div><b class="gold">PEG</b><span class="n">20</span><p>Recurrent excitation back into the same wedge. Keeps the bump from fading.</p></div>
+        <div><b class="eye">PEN_a</b><span class="n">20</span><p>Angular-velocity input. Left-side PEN neurons shift the bump one way, right-side the other. That is what “turn” drives.</p></div>
+        <div><b class="eye">PEN_b</b><span class="n">22</span><p>A second, slower PEN population with the same shift.</p></div>
+        <div><b class="cyan">Δ7</b><span class="n">42</span><p>Glutamatergic, inhibitory. They read the bump and suppress everything far from it. “Shock” drives all of them at once.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="immortality">
+  <div class="wrap">
+    <div class="sec-head">
+      <div><p class="eyebrow">Digital immortality</p><h2>It can die. It cannot be lost.</h2></div>
+      <p>The organism burns one step of energy per simulation step. When energy reaches zero it dies: ticks stop, the brain is hashed, and the life is recorded in an on-chain lineage. Anyone can resurrect it. The same membrane potentials, the same engram, the same heading memory wake up in a new body at the origin. Generation plus one. Years after CryptoKitties, this is persistent on-chain life.</p>
+    </div>
+    <div class="steps">
+      <div><span class="k">state</span><h3>Brain</h3><p>155 membrane potentials, packed 16 to a storage word. Updated on every tick.</p></div>
+      <div><span class="k">memory</span><h3>Engram</h3><p>Neurons that fire habitually potentiate, silent ones depress. Slow, bounded, permanent. Plus a histogram of where the compass has pointed.</p></div>
+      <div><span class="k">death</span><h3>Frozen</h3><p>Energy hits zero. The state hash, birth block, death block, steps and spikes go into <code class="mono">lineage[]</code>.</p></div>
+      <div><span class="k">rebirth</span><h3>Resurrect</h3><p>Burn $FLY. The identical brain continues from the exact state it died in. Only the body is new.</p></div>
+    </div>
+    <div class="lineage">
+      <p class="eyebrow" style="margin-bottom:12px">Lineage</p>
+      <table><thead><tr><th>Gen</th><th>Born (block)</th><th>Died (block)</th><th>Steps lived</th><th>Spikes</th><th>Brain hash at death</th></tr></thead><tbody id="lineage-body"></tbody></table>
+      <p id="lineage-empty" class="note" style="margin-top:10px">Generation 0 is alive. No deaths yet.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="token">
+  <div class="wrap">
+    <div class="sec-head">
+      <div><p class="eyebrow">$FLY</p><h2>Everything the fly eats is gone forever.</h2></div>
+      <p>$FLY is a plain BEP-20 on BNB Smart Chain. There is no tax, no owner, no mint. The only sink is the fly: feeding, stimulating and resurrecting send tokens to the dead address. Supply only goes down, and every burn is a recorded act of care in the interaction history.</p>
+    </div>
+    <div class="tiles">
+      <div class="tile"><span class="v">1B</span><span class="k">total supply</span><p>1,000,000,000 FLY, 18 decimals.</p></div>
+      <div class="tile"><span class="v">0%</span><span class="k">tax</span><p>Ownership renounced. No transfer fees, no blacklist.</p></div>
+      <div class="tile"><span class="v">0.05</span><span class="k">gwei on BSC</span><p>A simulation step costs a fraction of a cent. That is why the brain can live here.</p></div>
+      <div class="tile"><span class="v">∞</span><span class="k">lives</span><p>Resurrection has no limit. Only the price.</p></div>
+    </div>
+    <div class="checks"><ul><li>Fixed supply, minted once</li><li>Burns go to 0x…dEaD, verifiable by anyone</li><li>FlyBrain has no owner and no admin functions</li></ul><ul><li>Every parameter of the brain is immutable</li><li>Deterministic: replay the whole life from events</li><li>Open source, MIT</li></ul><ul><li>Anyone can tick, feed, poke, resurrect</li><li>Circuit table stored as bytecode, hash-anchored</li><li>Reference token + 17 tests in the repo</li></ul></div>
+  </div>
+</section>
+
+<section class="block prov" id="provenance">
+  <div class="wrap">
+    <div class="sec-head">
+      <div><p class="eyebrow">Provenance</p><h2>Check every neuron yourself.</h2></div>
+      <p>The circuit comes from FlyWire release 783, the public whole-brain connectome of an adult female <i>Drosophila</i> (Dorkenwald et al., Nature 2024; Schlegel et al., Nature 2024). Each on-chain neuron carries its FlyWire root ID. The angular position of each EPG in the ring was measured from the coordinates of its synapses in the ellipsoid body. The full brain in the header is the same dataset: 139,248 neurons.</p>
+    </div>
+    <div class="prov-grid">
+      <div class="tile"><span class="k">circuit table keccak256</span><span class="v" id="meta-keccak"></span></div>
+      <div class="tile"><span class="k">connections file sha256 (Zenodo 10676866)</span><span class="v" id="meta-sha"></span></div>
+      <div class="tile"><span class="k">ring geometry</span><span class="v" id="meta-geom"></span></div>
+    </div>
+    <div class="neurons"><table><thead><tr><th>#</th><th>type</th><th>side</th><th>wedge</th><th>out</th><th>FlyWire root id (opens Codex)</th></tr></thead><tbody id="neuron-body"></tbody></table></div>
+  </div>
+</section>
+
+<section class="block" id="roadmap">
+  <div class="wrap">
+    <div class="sec-head"><div><p class="eyebrow">Roadmap</p><h2>From one fly to a species.</h2></div><p>The genesis fly is one organism. The contracts are written so that more can exist, and so that brains can share a world.</p></div>
+    <div class="roadmap">
+      <div class="now"><span class="k">now</span><h3>Genesis fly</h3><p>One brain, one body, one lineage. Feed it, steer it, keep it alive.</p></div>
+      <div><span class="k">next</span><h3>Keeper economy</h3><p>Rewards for whoever keeps the brain ticking. Gas-optimised v2 brain.</p></div>
+      <div><span class="k">then</span><h3>The colony</h3><p>Multiple flies in a shared on-chain arena. Same circuit, different lives, different memories.</p></div>
+      <div><span class="k">later</span><h3>Breeding</h3><p>Cross two engrams into a new fly. A species that evolves on-chain.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Immortal Fruit Fly · not financial advice · it is a fly</div>
+    <div class="links"><a id="link-x" href="#" target="_blank" rel="noopener">X</a><a id="link-tg" href="#" target="_blank" rel="noopener">Telegram</a><a id="link-gh" href="#" target="_blank" rel="noopener">GitHub</a><a id="link-gh2" href="#" target="_blank" rel="noopener">Contracts</a></div>
+  </div>
+</footer>
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.15.0/ethers.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="assets/circuit.js"></script>
+<script src="assets/brain_points.js"></script>
+<script src="js/flysim.js"></script>
+<script src="js/brain3d.js"></script>
+<script src="js/chain.js"></script>
+<script src="js/app.js"></script>
