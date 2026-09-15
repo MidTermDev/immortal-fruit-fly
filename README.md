@@ -48,6 +48,7 @@
 
 | | Address |
 |---|---|
+| `FlyWorld` (the whole-brain fly's arena: food, checkpoints, lineage) | [`0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4`](https://bscscan.com/address/0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4) |
 | `$FLY` token (Immortal Fruit Flies) | [`0x23791aa3b031659b593cf141a2bc76b0ad657777`](https://bscscan.com/token/0x23791aa3b031659b593cf141a2bc76b0ad657777) |
 | `FlyBrain` v2 (the genesis fly, live) | [`0xee80f8cB5309C572343c38b5D717283BBBb517c5`](https://bscscan.com/address/0xee80f8cB5309C572343c38b5D717283BBBb517c5) |
 | circuit table v2 (SSTORE2 data contract) | [`0x2eE3C5168CD3F60E87693716E660470011EA9C7e`](https://bscscan.com/address/0x2eE3C5168CD3F60E87693716E660470011EA9C7e) |
@@ -59,6 +60,17 @@ Circuit table keccak256: `0xffbe0e7f28e1f0dd2cfaa01d1d221c502bf41c1fd519ebfe8d9b
 FlyWire connections file sha256: `24f960ae3e7d4f8cd30db3b62e99fb5179cc3d1e76d8c155bfb441e9737d3faf`
 
 ---
+
+## The whole brain
+
+`brain/` runs **all 139,248 neurons** of FlyWire release 783 (2,700,429 connections with ≥5 synapses) as leaky integrate-and-fire units with the parameters of Shiu et al. 2024, event-driven and compiled with Numba, at real time on 16 CPU cores. The fly lives in an arena (`brain/world.py`): odor plumes from food drive its real olfactory receptor neurons, a looming predator drives LC4/LPLC2, standing on food drives its gustatory neurons; DNa02/DNa01 left-minus-right steer it, a giant-fiber spike makes it jump. Food only exists through `FlyWorld.placeFood()` on BSC (burns $FLY). Every 10 minutes `brain/server.py` hashes the entire brain state and posts a checkpoint on-chain, and serves the snapshot so anyone can re-run the model and verify the next hash.
+
+```bash
+.venv/bin/pip install numba aiohttp pyarrow pandas
+.venv/bin/python brain/build_connectome.py   # FlyWire -> connectome_783.npz (needs data/ from sim/fetch_data.sh)
+.venv/bin/python brain/world.py              # 150 s of embodied brain, headless
+brain/run.sh                                 # live server + public tunnel (needs deploy.txt / PRIVATE_KEY, rpc.txt)
+```
 
 ## What this is
 

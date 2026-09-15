@@ -7,8 +7,32 @@ export default function Page() {
   const p = params as any;
   return (
     <DocsShell current="/docs/how-it-works/">
-      <h1>How the brain runs on-chain</h1>
-      <p className="lede">Integer leaky-integrate-and-fire neurons, synchronous spikes, deterministic noise, packed storage. Everything the EVM can do exactly, and nothing it cannot.</p>
+      <h1>How it works</h1>
+      <p className="lede">Two brains. The whole connectome runs on a server in the published whole-brain model, embodied in a world, and is anchored to BNB Smart Chain by hashes and fed by burns. A 155-neuron core runs entirely inside a contract. This page covers both.</p>
+
+      <h2>Part 1 · The whole brain</h2>
+      <h3>The model</h3>
+      <p>All 139,248 neurons of FlyWire release 783 and the 2,700,429 connections with at least five synapses (34.2 M synapses in total), as leaky integrate-and-fire units with the parameters of Shiu et al. 2024 (<i>Nature</i> 634:210), the model every whole-brain demo of the last year uses: resting and reset potential −52 mV, threshold −45 mV, membrane time constant 20 ms, synaptic time constant 5 ms, refractory period 2.2 ms, synaptic delay 1.8 ms, and 0.275 mV of drive per synapse, negative when the presynaptic neuron is predicted GABAergic or glutamatergic. Time step 0.1 ms. Sensory neurons are driven as Poisson spike sources.</p>
+      <p>The kernel is event-driven and compiled (Numba): only neurons that spike touch their outgoing synapses. On 16 CPU cores the whole brain runs at 1.0–1.2× real time. The random stream is hashed from the step number and the neuron index, so a run is reproducible bit for bit from any snapshot.</p>
+      <h3>Senses</h3>
+      <table className="data"><thead><tr><th>Sense</th><th>Real neurons driven</th><th>Driven by</th></tr></thead><tbody>
+        <tr><td>Smell</td><td>ORNs of the fruit-responsive glomeruli DM1, DM4, VA2, DM2, VM2, DP1m (Or42b, Or59b, Or92a, Or22a, Or43b …), split by antenna; all other ORNs at 2 Hz</td><td>Gaussian odor plumes of the food items (σ 30 body lengths). Bilateral contrast is sharpened before the antennae (gain 8, clipped) because a smooth plume is far gentler than the filaments and head-casting a real fly uses.</td></tr>
+        <tr><td>Sight</td><td>R1–R6 photoreceptors, 8,452 cells, by eye</td><td>Uniform dim light (3 Hz). A lamp gradient is implemented but off for now: it competes with the odor for steering.</td></tr>
+        <tr><td>Looming</td><td>LC4 (104) and LPLC2 (210) visual projection neurons, by side</td><td>A predator approaching from an edge: LC4 by angular expansion rate, LPLC2 by angular size (Ache et al. 2019).</td></tr>
+        <tr><td>Taste</td><td>213 labellar gustatory neurons</td><td>80 Hz while standing on food.</td></tr>
+      </tbody></table>
+      <h3>Motor</h3>
+      <ul>
+        <li><strong>Turning.</strong> DNa02 and DNa01, left minus right, plus the 26-per-side DNa descending population. DNa02 activation drives an ipsilateral turn (Rayshubskiy et al. 2025); turning is distributed across many DNs (Braun et al. 2024). Each neuron&apos;s rate is compared to its own slowly adapting baseline (τ 8 s), because the reconstruction has strong fixed left–right asymmetries; rates are integrated over 300 ms.</li>
+        <li><strong>Walking.</strong> Speed follows the surge-and-cast program measured in walking flies by Álvarez-Salvado et al. 2018: rising odor → surge (4.5 body lengths/s, straight), falling odor → cast (slow, sustained turning in the direction the DNs favour), otherwise walk at 3. DNp09 adds forward drive; MDN subtracts (backward walking).</li>
+        <li><strong>Jumping.</strong> A spike in DNp01, the giant fiber, is an escape jump of 12 body lengths away from the predator.</li>
+      </ul>
+      <div className="callout"><b>What is and is not the connectome.</b> The neurons, their wiring, their transmitters and the whole-brain dynamics are the connectome. The mapping from world to sensory rates, the contrast sharpening, the adaptive baselines and the surge-and-cast speed rule are the embodiment layer, chosen from the literature and documented here. Without a sharpening step the fly does not chemotax: bilateral olfactory differences in the real animal are small, and both antennae project to both antennal lobes, so single descending neurons carry the gradient only when one antenna is nearly silent. We measured this before choosing the readout.</div>
+      <h3>Metabolism and the chain</h3>
+      <p>One simulated second costs one second of energy. Eating restores it. Every ten minutes the server hashes the complete brain state, saves the snapshot, and calls <code>FlyWorld.checkpoint()</code> on BNB Smart Chain with the hash, position, energy and spike count. Food exists only through <code>FlyWorld.placeFood()</code>: the server reads the event and puts the food into the arena. At zero energy the server reports the death with a final hash; <code>resurrect()</code> burns $FLY and the same brain is restored from that snapshot. To verify a checkpoint, download its snapshot, run <code>brain/world.py</code> with the same food placements, and compare the next checkpoint&apos;s hash.</p>
+
+      <h2>Part 2 · The on-chain core</h2>
+      <p>Integer leaky-integrate-and-fire neurons, synchronous spikes, deterministic noise, packed storage. Everything the EVM can do exactly, and nothing it cannot.</p>
 
       <h2>The neuron model</h2>
       <p>Each of the 155 neurons has a membrane potential <code>v</code> (an int16 in storage, int32 while computing). Every simulation step, for every neuron:</p>
