@@ -58,6 +58,17 @@ export class Chain {
     for (let i = 0; i < n; i++) { const l = await this.brain.lineage(i); out.push({ generation: i, bornBlock: Number(l.bornBlock), diedBlock: Number(l.diedBlock), steps: Number(l.steps), spikes: Number(l.spikes), hash: l.brainStateHash }); }
     return out;
   }
+  /** Seconds per simulated step, measured from the real interval between on-chain ticks. */
+  async careRate(events: any[]) {
+    const ticks = events.filter((e) => e.name === "Ticked").slice().reverse();
+    if (ticks.length < 2) return null;
+    const [a, b] = await Promise.all([this.provider.getBlock(ticks[0].block), this.provider.getBlock(ticks[ticks.length - 1].block)]);
+    const dt = Number(b.timestamp) - Number(a.timestamp);
+    if (dt <= 0) return null;
+    const steps = ticks.reduce((n: number, t: any) => n + Number(t.args.steps), 0);
+    return { stepsPerSecond: steps / dt, stepsPerDay: (steps / dt) * 86400, windowSeconds: dt, ticks: ticks.length };
+  }
+
   async recentEvents(blocks = 20000) {
     const to = await this.provider.getBlockNumber(); const from = Math.max(0, to - blocks);
     const raw: any[] = [];
