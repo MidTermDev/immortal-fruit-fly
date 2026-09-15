@@ -10,7 +10,7 @@ export default function Page() {
       <h1>Contracts &amp; addresses</h1>
       <p className="lede">Everything is on BNB Smart Chain (chain ID 56). Sources are verified on BscScan and on Sourcify as exact matches.</p>
       <table className="data"><thead><tr><th>Contract</th><th>Address</th></tr></thead><tbody>
-        <tr><td><code>FlyRegistry</code>, the organism: ERC-721 “Immortal Fruit Flies” (FLYS), identity, brain state, memory, lineage, history</td><td><a href={`${ex}/address/${CFG.registry}#code`}>{CFG.registry}</a> · <a href={`${CFG.opensea}/1`}>OpenSea</a></td></tr>
+        <tr><td><code>FlyRegistry</code>, the organism: ERC-721 “Immortal Fruit Flies” (FLYS), identity, brain state, memory, lineage, history</td><td><a href={`${ex}/address/${CFG.registry}#code`}>{CFG.registry}</a> · <a href={CFG.market.collection}>Element</a></td></tr>
         <tr><td>Arena body (streams the live fly)</td><td><a href={`${ex}/address/${CFG.bodies.arena}`}>{CFG.bodies.arena}</a></td></tr>
         <tr><td>DOOM body</td><td><a href={`${ex}/address/${CFG.bodies.doom}`}>{CFG.bodies.doom}</a></td></tr>
         <tr><td><code>$FLY</code> token</td><td><a href={`${ex}/token/${CFG.token}`}>{CFG.token}</a></td></tr>

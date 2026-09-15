@@ -148,7 +148,7 @@ export default function LiveFly() {
               <div className="cap"><span>{h ? `${fmt(Math.round(energyS))} s of energy` : ""}</span><span>{h ? `${h.food.length} food item${h.food.length === 1 ? "" : "s"} in the arena` : ""}</span></div>
             </div>
             <div className="crow"><span>status</span><span><span className={`dot${alive ? "" : " dead"}${streaming ? "" : " sim"}`} style={{ display: "inline-block", marginRight: 7 }} />{st ? (st.key === "alive" ? (streaming ? `alive · in ${bodyName(fly!.body)}` : `alive · in ${bodyName(fly!.body)} · stream offline`) : st.label) : alive ? "alive" : "dead"}</span></div>
-            <div className="crow"><span>token</span><span><Link href={`/fly/?id=${FLY_ID}`}>fly #{FLY_ID}</Link> · <a href={`${CFG.opensea}/${FLY_ID}`} target="_blank" rel="noopener">OpenSea ↗</a></span></div>
+            <div className="crow"><span>token</span><span><Link href={`/fly/?id=${FLY_ID}`}>fly #{FLY_ID}</Link> · <a href={`${CFG.market.asset}/${FLY_ID}`} target="_blank" rel="noopener">{CFG.market.name} ↗</a></span></div>
             <div className="crow"><span>generation · deaths</span><span>{fly ? `${fly.generation} · ${fly.deaths}` : h ? h.generation : "—"}</span></div>
             <div className="crow"><span>age</span><span>{h ? hms(h.t_ms / 1000) : "—"}</span></div>
             <div className="crow"><span>spikes fired</span><span>{h ? fmt(h.spikes_total) : "—"}</span></div>
@@ -224,7 +224,7 @@ export default function LiveFly() {
               <div className="care-t"><h3>{alive ? "The organism" : "Resurrect"}</h3><span className="cost">{alive ? (fly ? `gen ${fly.generation} · ${fly.deaths} deaths` : "") : reg ? `${fmtTok(reg.res)} $FLY + food` : ""}</span></div>
               {alive ? (<>
                 <p>Fly #1 is a token in the <Link href="/flies/">Immortal Fruit Flies</Link>. Its brain, memory, lineage and history live on the registry, not in this arena; {hosted ? `${bodyName(fly!.body)} is only the body running it right now` : "no body is running it right now"}. Every feed is stored against the address that paid.</p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><Link className="btn sm" href={`/fly/?id=${FLY_ID}`}>Fly #1’s record</Link><a className="btn sm" href={`${CFG.opensea}/${FLY_ID}`} target="_blank" rel="noopener">OpenSea ↗</a><Link className="btn sm plain" href="/flies/">Mint your own →</Link></div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><Link className="btn sm" href={`/fly/?id=${FLY_ID}`}>Fly #1’s record</Link><a className="btn sm" href={`${CFG.market.asset}/${FLY_ID}`} target="_blank" rel="noopener">{CFG.market.name} ↗</a><Link className="btn sm plain" href="/flies/">Mint your own →</Link></div>
               </>) : (<>
                 <p>Energy reached zero. The brain was frozen at that instant and its hash written on-chain. Burn $FLY to continue the same brain, as generation {fly ? fly.generation + 1 : ""}. Until then the token cannot be sold.</p>
                 <div className="field"><input type="number" min={60} value={resFood} onChange={(e) => setResFood(e.target.value)} aria-label="Seconds of food to wake up with" /><button className="btn fill" disabled={busy} onClick={wallet ? resurrect : connect}>{wallet ? "Resurrect" : "Connect wallet"}</button></div>

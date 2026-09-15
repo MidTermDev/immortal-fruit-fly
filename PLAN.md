@@ -80,7 +80,7 @@ Rules the contract enforces: a fly has at most one body; only that body commits;
 
 ### 3.2 Brain state on a permanent layer
 
-Snapshots (~12 MB) are pinned to **IPFS** (Pinata) by the body at every commit, and the registry's `stateURI` is the `ipfs://` CID while `stateRoot` is the sha256 of the bytes, so any body verifies what it downloads. Token metadata (portrait, status, energy, brain step, body, lineage) is re-pinned with every commit so OpenSea shows the fly as it is. **BNB Greenfield** is the planned mirror (the BNB-native story; needs a funded Greenfield account). The tunnel-hosted snapshots are only a cache.
+Snapshots (~12 MB) are pinned to **IPFS** (Pinata) by the body at every commit, and the registry's `stateURI` is the `ipfs://` CID while `stateRoot` is the sha256 of the bytes, so any body verifies what it downloads. Token metadata (portrait, status, energy, brain step, body, lineage) is re-pinned with every commit so marketplaces (Element on BNB Chain) show the fly as it is. **BNB Greenfield** is the planned mirror (the BNB-native story; needs a funded Greenfield account). The tunnel-hosted snapshots are only a cache.
 
 **[Shipped: IPFS via the body keys; fly #1's commits and hand-offs fetched and hash-verified from IPFS on mainnet.]**
 
@@ -124,7 +124,7 @@ Each step is shippable and leaves the live fly running.
 2. **Permanent storage.** IPFS pin on every commit, `stateURI = ipfs://…`; Greenfield mirror later. **[Done, IPFS.]**
 3. **The arena and DOOM as bodies.** `server.py` and `doom.py` speak the registry protocol: accept, instantiate (fetch + verify), commit, interactions, death. Demonstrate the loop: fly #1 arena → DOOM → arena with hashes matching across the move. **[Done on mainnet.]** The Body SDK (packaging the loop for others) is still to do.
 4. **Per-fly on-chain core.** `FlyCore` keyed by registry id; the arena and DOOM bodies cue it; the commit carries its heading.
-5. **Minting for everyone.** Site: mint (1 $FLY), your flies, assign to a body, feed, resurrect, breed; a fly page with its lineage, its history across bodies, its live stream when the arena is running it; OpenSea branding (`contractURI`, per-token metadata). **[Done.]** Then the arena hosts many flies at once (same brain kernel, time-sliced; ~50 flies per machine). **[To do.]**
+5. **Minting for everyone.** Site: mint (1 $FLY), your flies, assign to a body, feed, resurrect, breed; a fly page with its lineage, its history across bodies, its live stream when the arena is running it; marketplace branding (`contractURI`, per-token metadata; Element indexes BNB Chain, OpenSea does not). **[Done.]** Then the arena hosts many flies at once (same brain kernel, time-sliced; ~50 flies per machine). **[To do.]**
 6. **Attestors.** Publish the re-runner; run two independent ones ourselves; show attestation counts.
 7. **Memory.** Mushroom-body plasticity in the model, `memoryRoot`, `breed`.
 8. **More bodies.** RuneScape (the copied world), and an open call for robots. DOOM stays as the demo body.

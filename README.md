@@ -28,7 +28,7 @@
 <p align="center">
   <a href="https://midtermdev.github.io/immortal-fruit-fly/">Watch fly #1 live</a> ·
   <a href="https://midtermdev.github.io/immortal-fruit-fly/flies/">Mint a fly (1 $FLY)</a> ·
-  <a href="https://opensea.io/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813/1">OpenSea</a> ·
+  <a href="https://element.market/collections/immortal-fruit-flies-1">Element (marketplace)</a> ·
   <a href="https://midtermdev.github.io/immortal-fruit-fly/docs/">Docs</a> ·
   <a href="PLAN.md">The plan</a>
 </p>
@@ -63,7 +63,7 @@ Siyuan's reply to that (quoted by CZ: *"immortal fruit flies on BNB Chain"*) nam
 | Bodies | `registerBody`, `assign` (owner or current body), `accept`, `commit` (forward only), `interaction`, `died`, `release` |
 | Royalty | ERC-2981, 2.5% |
 | Metadata | per-fly JSON + portrait on IPFS, refreshed by the body at every commit (status, energy, brain step, body, lineage); collection `contractURI` on IPFS |
-| OpenSea | https://opensea.io/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813/1 |
+| Marketplace | Element (the NFT marketplace that indexes BNB Chain; OpenSea does not list BSC): https://element.market/collections/immortal-fruit-flies-1 · fly #1: https://element.market/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813/1 |
 
 ## Live on BNB Smart Chain
 

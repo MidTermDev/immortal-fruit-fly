@@ -82,7 +82,7 @@ export default function Specimen() {
               <h1 style={{ fontSize: "clamp(28px, 4vw, 46px)", letterSpacing: "-0.035em" }}>{f ? f.name || `Fly #${id}` : "…"}</h1>
               {s && <p className="serif" style={{ fontSize: 16.5, color: "var(--ink-2)", marginTop: 12, maxWidth: "52ch" }}>{s.note}. {f && f.parentA ? <>Child of <Link href={`/fly/?id=${f.parentA}`}>#{pad(f.parentA)}</Link> and <Link href={`/fly/?id=${f.parentB}`}>#{pad(f.parentB)}</Link>.</> : "A genesis fly: fresh brain, no parents."} {f && f.deaths > 0 ? `It has died ${f.deaths} time${f.deaths === 1 ? "" : "s"} and been brought back each time from the exact state it died in.` : ""}</p>}
               <div className="acts" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 20 }}>
-                <a className="btn sm" href={`${CFG.opensea}/${id}`} target="_blank" rel="noopener">OpenSea ↗</a>
+                <a className="btn sm" href={`${CFG.market.asset}/${id}`} target="_blank" rel="noopener">Buy / sell on {CFG.market.name} ↗</a>
                 {f && f.body.toLowerCase() === CFG.bodies.arena.toLowerCase() && <Link className="btn sm" href="/#organism">Watch it live</Link>}
                 {f && f.stateURI && <a className="btn sm plain" href={ipfs(f.stateURI)} target="_blank" rel="noopener">Brain snapshot (IPFS) ↗</a>}
                 <a className="btn sm plain" href={`${CFG.explorer}/token/${CFG.registry}?a=${id}`} target="_blank" rel="noopener">BscScan →</a>
@@ -140,7 +140,7 @@ export default function Specimen() {
             <RecordList events={events} names={names} empty={err ? "" : "reading BNB Smart Chain…"} />
           </div>
           {meta?.attributes && <div style={{ marginTop: 34 }}>
-            <div className="log-head"><b style={{ fontSize: 13 }}>Token metadata</b><span className="lbl">as OpenSea reads it · <a href={ipfs(f?.uri || "")} target="_blank" rel="noopener">{f?.uri.slice(0, 30)}…</a></span></div>
+            <div className="log-head"><b style={{ fontSize: 13 }}>Token metadata</b><span className="lbl">as marketplaces read it · <a href={ipfs(f?.uri || "")} target="_blank" rel="noopener">{f?.uri.slice(0, 30)}…</a></span></div>
             <div className="chips" style={{ marginTop: 12 }}>{meta.attributes.map((a: any, i: number) => <span key={i} className="chip"><span className="lbl">{a.trait_type}</span><b>{String(a.value)}</b></span>)}</div>
           </div>}
         </div>

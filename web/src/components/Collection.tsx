@@ -99,8 +99,8 @@ export default function Collection() {
             </div>
             <div className="care-col">
               <div className="care-t"><h3>Your flies</h3><span className="cost">{wallet ? `${mine.length} owned` : ""}</span></div>
-              {wallet ? (mine.length ? <div className="chips">{mine.map((i) => <Link key={i} href={`/fly/?id=${i}`} className="btn sm">#{pad(i)}</Link>)}</div> : <p>None yet. Mint one, or buy one on OpenSea.</p>) : <p>Connect a wallet to see the flies you own, then open one to feed it, hand it to a body, resurrect it or breed it.</p>}
-              <a className="btn sm plain" href={CFG.opensea.replace("/assets/bsc/", "/collection/").replace(CFG.registry, "immortal-fruit-flies")} target="_blank" rel="noopener">Collection on OpenSea ↗</a>
+              {wallet ? (mine.length ? <div className="chips">{mine.map((i) => <Link key={i} href={`/fly/?id=${i}`} className="btn sm">#{pad(i)}</Link>)}</div> : <p>None yet. Mint one, or buy one on {CFG.market.name}.</p>) : <p>Connect a wallet to see the flies you own, then open one to feed it, hand it to a body, resurrect it or breed it.</p>}
+              <a className="btn sm plain" href={CFG.market.collection} target="_blank" rel="noopener">Collection on {CFG.market.name} ↗</a>
             </div>
             <div className="care-col">
               <div className="care-t"><h3>The rules</h3><span className="cost">enforced by the contract</span></div>

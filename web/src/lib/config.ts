@@ -18,7 +18,8 @@ export const CFG = {
   registry: "0x0eeB0A675720306Ef6f426Bd8560c1288848f813",
   registryDeployBlock: 122001000,
   bodies: { arena: "0x47005543c06246124480D196a275327325695BEd", doom: "0x642ebC7fD62a24406d8A86885F0131472E641c86" },
-  opensea: "https://opensea.io/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813",
+  // Element is the NFT marketplace that indexes BNB Chain collections (OpenSea does not list BSC).
+  market: { name: "Element", asset: "https://element.market/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813", collection: "https://element.market/collections/immortal-fruit-flies-1" },
   ipfsGateway: "https://gateway.pinata.cloud/ipfs/",
   liveFallback: process.env.NEXT_PUBLIC_LIVE_URL || "",
   circuitPtr: "0x2eE3C5168CD3F60E87693716E660470011EA9C7e",

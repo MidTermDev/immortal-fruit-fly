@@ -105,7 +105,7 @@ class Registry:
         cid = self.pinata.pin(path, os.path.basename(path)); return cid, f'ipfs://{cid}'
 
     def metadata(self, fid, image_uri, extra=None, body_name=None, state=None):
-        """OpenSea-style token metadata. `state` overrides the chain record with the values being committed right now
+        """ERC-721 token metadata (the OpenSea metadata standard, which Element and every BNB Chain marketplace read). `state` overrides the chain record with the values being committed right now
         (stateRoot, stateURI, brainStep, energy, alive, body), so metadata never lags a commit behind."""
         f = dict(self.fly(fid)); f.update(state or {}); alive = f['alive']
         body = body_name or ('none' if f['body'] in ('0x0000000000000000000000000000000000000000', '', None) else f['body'])
