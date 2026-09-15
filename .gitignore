@@ -48,3 +48,4 @@ scape/
 brain/pinata.env
 brain/body_*.key
 web/.next.pid
+web/*.png
