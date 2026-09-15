@@ -95,19 +95,19 @@ void setup() {
     netProvisionPortal(s_apName, provisionTick);   // never returns
   }
   { Lock l(g_stateMutex); g_state.phase = Phase::CONNECT; }
-  uiBootMessage("joining Wi-Fi", nc.ssid.c_str());
+  uiBootMessage("joining Wi-Fi", "the fly is waking up");   // the network name stays off the screen
   if (!netConnect(nc, 20000)) {
     if (nc.fromSecrets) {
       // wrong secrets and no way to fix them from the device: keep trying in the background, the UI says so
-      setStatus("Wi-Fi %s not reachable; retrying", nc.ssid.c_str());
+      setStatus("Wi-Fi not reachable; retrying");
     } else {
       // NVS credentials that do not work: offer the portal again
-      setStatus("Wi-Fi %s failed: join %s to fix", nc.ssid.c_str(), s_apName);
+      setStatus("Wi-Fi failed: join %s to fix", s_apName);
       uiProvisionPage(s_apName);
       netProvisionPortal(s_apName, provisionTick);
     }
   } else {
-    setStatus("Wi-Fi %s, %s", nc.ssid.c_str(), WiFi.localIP().toString().c_str());
+    setStatus("Wi-Fi connected");
   }
   Serial.printf("[net] rpc %s\n", nc.rpcUrl.c_str());
 

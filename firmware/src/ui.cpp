@@ -1,4 +1,5 @@
 #include "ui.h"
+#include "flyart.h"
 #include <M5Unified.h>
 #include <math.h>
 #include <stdio.h>
@@ -282,11 +283,24 @@ int uiFrame(const BodyState& s, const RingData& r, bool wifi, bool hostingRing) 
 
 // ---- modal pages
 
+// The ASCII fly from brand/fly.txt, drawn as a silhouette: Font0 scaled so 57 columns fit in 320 px.
+static void drawAsciiFly(int cx, int top, uint16_t color) {
+  const float scale = 0.9f;                 // 6 px advance × 0.9 = 5.4 px → 57 cols ≈ 308 px
+  const int lineH = (int)(8 * scale + 0.5f);
+  frame.setFont(&fonts::Font0);
+  frame.setTextSize(scale);
+  frame.setTextDatum(textdatum_t::top_center);
+  frame.setTextColor(color);
+  for (int i = 0; i < FLYART_LINES; i++) frame.drawString(FLYART[i], cx, top + i * lineH);
+  frame.setTextSize(1.0f);
+}
+
 void uiBootMessage(const char* l1, const char* l2) {
   frame.fillScreen(C_BG);
-  text(160, 96, "Immortal Fruit Fly", C_AMBER, &fonts::Font2, textdatum_t::top_center);
-  text(160, 120, l1, C_TXT, &fonts::Font2, textdatum_t::top_center);
-  if (l2) text(160, 144, l2, C_DIM, &fonts::Font0, textdatum_t::top_center);
+  text(160, 8, "Immortal Fruit Fly", C_AMBER, &fonts::Font2, textdatum_t::top_center);
+  drawAsciiFly(160, 36, C_TXT);
+  text(160, 172, l1, C_TXT, &fonts::Font2, textdatum_t::top_center);
+  if (l2) text(160, 198, l2, C_DIM, &fonts::Font0, textdatum_t::top_center);
   frame.pushSprite(0, 0);
 }
 
