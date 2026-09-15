@@ -101,7 +101,7 @@
     st.className = 'status' + (alive ? '' : ' dead') + (mode === 'preview' ? ' preview' : '');
     const src = mode === 'chain' && chainState ? chainState : sim;   // the label reports what is on-chain; the animation runs ahead
     $('gen').textContent = src.generation;
-    $('step').textContent = fmt(src.step) + (mode === 'chain' ? ` (+${fmt(sim.step - chainState.step)} preview)` : '');
+    $('step').textContent = fmt(src.step);
     $('energy').textContent = fmt(src.energy);
     $('spikes').textContent = fmt(mode === 'chain' ? chainState.totalSpikes : sim.totalSpikes);
     $('pos').textContent = `${(src.posX / 256).toFixed(1)}, ${(src.posY / 256).toFixed(1)}`;
