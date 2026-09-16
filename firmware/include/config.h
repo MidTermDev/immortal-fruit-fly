@@ -54,7 +54,7 @@
 #define HOST_ORIGIN_REFRESH_S 300         // re-read bodies(FLY_HOST_ADDR).uri this often (and after a failure)
 #define HOST_ORIGIN_RETRY_S 30            // ...but never more often than this
 #define HOST_WS_RECONNECT_MS 5000         // WebSocket reconnect interval
-#define HOST_WS_GIVEUP_MS 20000           // no frame this long after a WebSocket start: poll /frame instead for a while
+#define HOST_WS_GIVEUP_MS 8000            // no frame this long after a WebSocket start: poll /frame instead for a while
 #define HOST_WS_RETRY_MS 60000            // ...and try the WebSocket again after this long
 #define HOST_SENSE_MIN_MS 1000            // POST /sense at most once a second (the host drops extras anyway)
 #define HOST_SHOCK_SIDE "right"           // the spider sensor has no side of its own: where the predator appears from

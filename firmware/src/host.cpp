@@ -42,7 +42,7 @@ char s_lastError[96] = "";
 void setError(const char* what, const char* detail = nullptr) {
   if (detail && *detail) snprintf(s_lastError, sizeof s_lastError, "%s: %s", what, detail);
   else snprintf(s_lastError, sizeof s_lastError, "%s", what);
-  Serial.printf("[host] %s\n", s_lastError);
+  Serial.printf("[host] %s (heap free %u, largest %u)\n", s_lastError, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
   Lock l(g_hostMutex);
   strlcpy(g_host.lastError, s_lastError, sizeof g_host.lastError);
   g_host.lastErrorMs = millis();

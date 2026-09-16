@@ -223,6 +223,7 @@ int uiFrame(const BodyState& s, const RingData& r, const HostView& h, bool wifi,
   m.hasFly = (s.phase == Phase::HOST || s.phase == Phase::DEAD) && s.flyId != 0;
   m.alive = s.phase == Phase::HOST ? s.alive : false;
   m.hostFresh = fresh; m.hostKnown = h.originKnown; m.hostOffline = s.phase == Phase::HOST && h.originKnown && !fresh;
+  strlcpy(m.hostError, h.lastError, sizeof m.hostError);
   m.generation = s.generation; m.energy = s.energy;
   m.registered = s.phase != Phase::REGISTER && s.phase != Phase::CONNECT && s.phase != Phase::BOOT;
   m.assignmentPending = s.assignmentPending; m.flyTokens = s.flyTokens; m.hatchArmed = s.hatchArmed;

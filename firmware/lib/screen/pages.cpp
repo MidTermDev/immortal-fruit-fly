@@ -522,7 +522,7 @@ void drawLife(Painter& p, const Model& m) {
   worldPanel(p, m, st, false, LIFE_FLY_ZOOM);
   char b[48];
   if (m.hostFresh) snprintf(b, sizeof b, "brain on host %c %.1fx", DOT, m.realtime);
-  else if (m.hostOffline) snprintf(b, sizeof b, "brain host offline %c compass only", DOT);
+  else if (m.hostOffline) snprintf(b, sizeof b, "host: %s", m.hostError[0] ? m.hostError : "offline");
   else snprintf(b, sizeof b, "no brain host %c compass only", DOT);
   drawLabel(p, 4, WORLD_H - 10, b, F_SMALL, m.hostFresh ? col::DIM : col::RED, A_LEFT);
   statusLine(p, m, 4, 4, WORLD_W - 40);
@@ -550,7 +550,7 @@ void drawNeurons(Painter& p, const Model& m) {
   // the brain host's state on its own row: right-aligned on the legend row, "brain host offline" (108 px) would
   // start at x = 110, on top of the legend's "D7" (x 110..121)
   y += 11;
-  if (m.hostOffline) drawLabel(p, RASTER_X + RASTER_COLS - 2, y, "brain host offline", F_SMALL, col::RED, A_RIGHT);
+  if (m.hostOffline) drawLabel(p, RASTER_X + RASTER_COLS - 2, y, m.hostError[0] ? m.hostError : "brain host offline", F_SMALL, col::RED, A_RIGHT);
   else if (!m.hostKnown) drawLabel(p, RASTER_X + RASTER_COLS - 2, y, "no brain host", F_SMALL, col::DIM, A_RIGHT);
   y += 11;
   statusLine(p, m, 4, y, RASTER_COLS - 8);

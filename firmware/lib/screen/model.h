@@ -81,6 +81,7 @@ struct Model {
   bool alive = true;
   bool hostFresh = false;             // frames < HOST_STALE_MS old
   bool hostOffline = false;           // hosting, an origin is known, but no fresh frames
+  char hostError[48] = "";           // the host client's last error, shown on the screen while offline so a demo needs no serial cable
   bool hostKnown = false;             // an origin was ever known (else "no brain host")
   uint32_t generation = 0;
   float x = 0, y = 0, heading = 0;    // world position (body lengths, y up) and heading (rad, CCW from +x)
