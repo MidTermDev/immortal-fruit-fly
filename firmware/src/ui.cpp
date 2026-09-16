@@ -1,60 +1,33 @@
+// The screen: UI.md's pages are drawn by lib/screen onto an abstract Painter; this file implements that Painter on
+// the M5GFX frame sprite, feeds the Model from the pebble's state every frame (the host frame, the replica's raster
+// columns, the chain, the speech rules) and keeps the modal pages (boot, key, provisioning) as they were.
 #include "ui.h"
 #include "flyart.h"
 #include <M5Unified.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include "qrcode.h"
 #include "ethtx.h"
 #include "hostframe.h"
+#include "painter.h"
+#include "model.h"
+#include "pages.h"
+#include "creature.h"
+#include "speech.h"
 
-// ---- layout (320×240)
-static const int CX = 104, CY = 110;       // ring centre
-static const int R_IN = 52, R_OUT = 86;    // activity ring
-static const int H_IN = 89, H_OUT = 95;    // heading-histogram ring (the memory)
-static const int PX = 200, PW = 116;       // right panel
-static const int NARR_Y = 214;             // narration line
-static const int WX = 4, WY = 6, WS = 192; // the Life view's world panel (square, top-down)
-static const int LX = 204, LW = 112;       // the Life view's right column
+using namespace screen;
 
 static M5Canvas frame(&M5.Display);
-static M5Canvas glyph(&frame);
-static const uint16_t KEY = 0xF81F;        // transparent colour of the glyph sprite
+static M5Canvas rasterSprite(&frame);      // the Neurons raster, scrolled in PSRAM
+static bool s_rasterOk = false;
 static uint32_t s_flashUntil = 0;
+static uint32_t s_feedHintUntil = 0;
+static const uint16_t C_BG = col::BG, C_TXT = col::INK, C_DIM = col::DIM, C_AMBER = col::AMBER, C_RED = col::RED, C_GREEN = col::GREEN;
 
 static inline uint16_t rgb(int r, int g, int b) { return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)); }
-static inline uint16_t mix(int r, int g, int b, float a) { if (a < 0) a = 0; if (a > 1) a = 1; return rgb((int)(r * a), (int)(g * a), (int)(b * a)); }
 
-static const uint16_t C_BG = rgb(8, 8, 10), C_TXT = rgb(232, 230, 224), C_DIM = rgb(120, 120, 116), C_GREEN = rgb(80, 220, 120), C_RED = rgb(255, 90, 53), C_AMBER = rgb(240, 180, 41), C_BLUE = rgb(88, 196, 245), C_MAG = rgb(210, 90, 230), C_GREY = rgb(40, 40, 44);
-
-static void drawGlyph() {
-  glyph.setColorDepth(16);
-  glyph.createSprite(40, 40);
-  glyph.fillScreen(KEY);
-  // a fly pointing to +x: wings, abdomen, thorax, head, eyes
-  glyph.fillEllipse(14, 13, 12, 5, rgb(120, 130, 150));
-  glyph.fillEllipse(14, 27, 12, 5, rgb(120, 130, 150));
-  glyph.fillEllipse(13, 20, 9, 6, rgb(90, 60, 30));
-  glyph.fillEllipse(23, 20, 6, 5, rgb(120, 80, 40));
-  glyph.fillCircle(31, 20, 4, rgb(140, 95, 45));
-  glyph.fillCircle(33, 17, 2, C_RED);
-  glyph.fillCircle(33, 23, 2, C_RED);
-}
-
-void uiInit() {
-  M5.Display.setBrightness(UI_BRIGHTNESS);
-  M5.Display.fillScreen(C_BG);
-  frame.setColorDepth(UI_COLOR_DEPTH);
-  frame.setPsram(true);
-  if (!frame.createSprite(320, 240)) {
-    Serial.println("[ui] frame sprite failed; drawing direct");
-  }
-  frame.setTextWrap(false);
-  drawGlyph();
-}
-
-void uiFlash() { s_flashUntil = millis() + 120; }
-
-// ---- helpers
+// ---- helpers kept from the first screen
 
 static void text(int x, int y, const char* s, uint16_t color, const lgfx::IFont* font = &fonts::Font0, textdatum_t datum = textdatum_t::top_left) {
   frame.setFont(font);
@@ -63,22 +36,8 @@ static void text(int x, int y, const char* s, uint16_t color, const lgfx::IFont*
   frame.drawString(s, x, y);
 }
 
-// draw s clipped to width w by dropping characters (with an ellipsis)
-static void textFit(int x, int y, const char* s, int w, uint16_t color, const lgfx::IFont* font = &fonts::Font0) {
-  frame.setFont(font);
-  if (frame.textWidth(s) <= w) { text(x, y, s, color, font); return; }
-  char buf[128];
-  size_t n = strlen(s); if (n > sizeof buf - 2) n = sizeof buf - 2;
-  while (n > 0) {
-    memcpy(buf, s, n); buf[n] = '~'; buf[n + 1] = 0;
-    if (frame.textWidth(buf) <= w) break;
-    --n;
-  }
-  text(x, y, buf, color, font);
-}
-
-// QR codes are regenerated only when the text changes (the modules are cached as a bitmap)
-static void drawQR(LovyanGFX& g, const char* txt, int x, int y, int maxPx, uint16_t fg, uint16_t bg) {
+// QR codes are regenerated only when the text changes (the modules are cached as a bitmap); returns the side in px
+static int drawQR(LovyanGFX& g, const char* txt, int x, int y, int maxPx, uint16_t fg, uint16_t bg) {
   static std::string cachedText;
   static uint8_t cachedSize = 0;
   static uint8_t* cachedModules = nullptr;   // one byte per module, cachedSize² bytes
@@ -87,11 +46,11 @@ static void drawQR(LovyanGFX& g, const char* txt, int x, int y, int maxPx, uint1
     uint8_t version = n <= 53 ? 3 : n <= 78 ? 4 : n <= 106 ? 5 : n <= 134 ? 6 : 8;
     QRCode qr;
     uint8_t* data = (uint8_t*)malloc(qrcode_getBufferSize(version));
-    if (!data) return;
-    if (qrcode_initText(&qr, data, version, ECC_LOW, txt) != 0) { free(data); return; }
+    if (!data) return 0;
+    if (qrcode_initText(&qr, data, version, ECC_LOW, txt) != 0) { free(data); return 0; }
     free(cachedModules);
     cachedModules = (uint8_t*)malloc((size_t)qr.size * qr.size);
-    if (!cachedModules) { free(data); return; }
+    if (!cachedModules) { free(data); return 0; }
     for (int yy = 0; yy < qr.size; ++yy)
       for (int xx = 0; xx < qr.size; ++xx) cachedModules[yy * qr.size + xx] = qrcode_getModule(&qr, xx, yy) ? 1 : 0;
     cachedSize = qr.size;
@@ -104,330 +63,225 @@ static void drawQR(LovyanGFX& g, const char* txt, int x, int y, int maxPx, uint1
   for (int yy = 0; yy < cachedSize; ++yy)
     for (int xx = 0; xx < cachedSize; ++xx)
       if (cachedModules[yy * cachedSize + xx]) g.fillRect(x + (xx + 1) * scale, y + (yy + 1) * scale, scale, scale, fg);
+  return side;
 }
 
-static void fmtBnb(uint64_t wei, bool overflow, char* out, size_t n) {
-  if (overflow) { snprintf(out, n, ">18 BNB"); return; }
-  double bnb = (double)wei / 1e18;
-  if (bnb >= 1) snprintf(out, n, "%.3f BNB", bnb);
-  else snprintf(out, n, "%.4f BNB", bnb);
-}
+// ---- the Painter on the frame sprite
 
-static void drawDots(int x, int y, bool wifi, bool ble) {
-  frame.fillCircle(x, y, 3, wifi ? C_GREEN : C_GREY);
-  text(x + 7, y - 4, "wifi", wifi ? C_TXT : C_DIM);
-  frame.fillCircle(x + 42, y, 3, ble ? C_BLUE : C_GREY);
-  text(x + 49, y - 4, "ble", ble ? C_TXT : C_DIM);
-}
-
-// ---- the ring
-
-static void drawRing(const RingData& r, const BodyState& s, bool live) {
-  // wedge w spans the counter-clockwise angles [w·22.5°, (w+1)·22.5°) from 3 o'clock, as on the site (lib/dial.ts).
-  // LGFX arcs are clockwise from 3 o'clock in screen space, so the screen arc is [360 − a1, 360 − a0].
-  uint32_t hm = 1;
-  for (int w = 0; w < flycore::WEDGES; ++w) if (r.hist[w] > hm) hm = r.hist[w];
-  for (int w = 0; w < flycore::WEDGES; ++w) {
-    float a0 = w * 22.5f, a1 = a0 + 22.5f - 1.7f;
-    float a = live ? r.act[w] : 0;
-    float spk = live ? (r.bins[w] > 3 ? 1.f : r.bins[w] / 3.f) : 0;
-    float lum = 0.06f + a * 0.85f;
-    if (spk > 0 && lum < 0.35f + spk * 0.5f) lum = 0.35f + spk * 0.5f;
-    uint16_t col;
-    if (a > 0.55f) { float t = (a - 0.55f) * 1.5f; if (t > 1) t = 1; col = mix((int)(240 + (255 - 240) * t), (int)(180 - 90 * t), (int)(41 + 12 * t), lum); }
-    else col = mix(240, 180, 41, lum);
-    frame.fillArc(CX, CY, R_IN, R_OUT, 360.f - a1, 360.f - a0, col);
-    float h = live ? (float)r.hist[w] / (float)hm : 0;
-    frame.fillArc(CX, CY, H_IN, H_OUT, 360.f - a1, 360.f - a0, mix(88, 196, 245, 0.07f + 0.6f * h));
+class M5Painter : public Painter {
+ public:
+  static const lgfx::IFont* fontOf(Font f) { return f == F_SMALL ? (const lgfx::IFont*)&fonts::Font0 : f == F_MED ? (const lgfx::IFont*)&fonts::Font2 : (const lgfx::IFont*)&fonts::FreeSansBold12pt7b; }
+  void fillRect(int x, int y, int w, int h, Color c) override { frame.fillRect(x, y, w, h, c); }
+  void drawLine(int x0, int y0, int x1, int y1, Color c) override { frame.drawLine(x0, y0, x1, y1, c); }
+  void fillCircle(int cx, int cy, int r, Color c) override { frame.fillCircle(cx, cy, r, c); }
+  void drawCircle(int cx, int cy, int r, Color c) override { frame.drawCircle(cx, cy, r, c); }
+  void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, Color c) override { frame.fillTriangle(x0, y0, x1, y1, x2, y2, c); }
+  void drawPixel(int x, int y, Color c) override { frame.drawPixel(x, y, c); }
+  void drawRect(int x, int y, int w, int h, Color c) override { frame.drawRect(x, y, w, h, c); }
+  void drawText(int x, int y, const char* s, Font f, Color c, Align a) override {
+    text(x, y, s, c, fontOf(f), a == A_LEFT ? textdatum_t::top_left : a == A_CENTER ? textdatum_t::top_center : textdatum_t::top_right);
   }
-  // wedge labels 0 / 4 / 8 / 12, as on the site
-  for (int w = 0; w < flycore::WEDGES; w += 4) {
-    float a = (w + 0.5f) * 22.5f * 0.01745329f;
-    char b[3]; snprintf(b, sizeof b, "%d", w);
-    text(CX + (int)(cosf(a) * 102), CY - (int)(sinf(a) * 102), b, C_DIM, &fonts::Font0, textdatum_t::middle_center);
-  }
-  text(4, 4, "on-chain", C_MAG);   // these neurons run in the EVM (the whole brain is on the host, Life view)
-  if (!live) return;
-  // the on-chain population vector (last anchor), magenta, thin
-  if (s.anchored && (s.chainHeadX || s.chainHeadY)) {
-    float a = atan2f((float)s.chainHeadY, (float)s.chainHeadX);
-    float m = sqrtf((float)s.chainHeadX * s.chainHeadX + (float)s.chainHeadY * s.chainHeadY) / (64.f * ANCHOR_STEPS);
-    if (m > 1) m = 1;
-    float L = R_IN * (0.35f + 0.65f * m);
-    frame.drawLine(CX, CY, CX + (int)(cosf(a) * L), CY - (int)(sinf(a) * L), C_MAG);
-  }
-  // the local needle: a white triangle, full length when the bump is strong
-  if (r.headX != 0 || r.headY != 0) {
-    float a = atan2f(r.headY, r.headX);
-    float L = R_IN * (0.35f + 0.65f * r.headMag);
-    float tx = CX + cosf(a) * L, ty = CY - sinf(a) * L;
-    float px = -sinf(a) * 3, py = -cosf(a) * 3;
-    frame.fillTriangle((int)(CX + px), (int)(CY + py), (int)(CX - px), (int)(CY - py), (int)tx, (int)ty, C_TXT);
-    // the fly glyph rotated to the heading (screen angles are clockwise)
-    glyph.pushRotateZoom(&frame, CX, CY, -a * 57.2957795f, 0.8f, 0.8f, KEY);
-  } else {
-    glyph.pushRotateZoom(&frame, CX, CY, 0, 0.8f, 0.8f, KEY);
-  }
-  frame.fillCircle(CX, CY, 3, C_RED);
-  // the active stimulus, if any
-  if (r.stimActive) {
-    const char* names[] = {"", "cue", "turn L", "turn R", "SHOCK"};
-    char b[24];
-    if (r.stimChannel == flycore::CH_CUE) snprintf(b, sizeof b, "cue w%d x%d", r.stimParam, r.stimStrength);
-    else snprintf(b, sizeof b, "%s x%d", names[r.stimChannel < 5 ? r.stimChannel : 0], r.stimStrength);
-    text(CX, CY + R_OUT + 12, b, r.stimChannel == flycore::CH_SHOCK ? C_RED : C_AMBER, &fonts::Font0, textdatum_t::middle_center);
-  }
-}
-
-// ---- the right panel
-
-static void drawPanel(const BodyState& s, const RingData& r, bool wifi) {
-  char b[64];
-  int y = 4;
-  if (s.flyId) {
-    textFit(PX, y, s.flyName[0] ? s.flyName : "Fly", PW, C_TXT, &fonts::Font2); y += 18;
-    snprintf(b, sizeof b, "#%llu  gen %lu", (unsigned long long)s.flyId, (unsigned long)s.generation);
-    text(PX, y, b, C_DIM); y += 12;
-  } else {
-    text(PX, y, s.bodyName, C_TXT, &fonts::Font2); y += 18;
-    text(PX, y, "no fly in this body", C_DIM); y += 12;
-  }
-  const char* ph = s.phase == Phase::HOST ? (s.alive ? "ALIVE" : "DEAD") : s.phase == Phase::DEAD ? "DEAD" : s.phase == Phase::WAIT ? "WAITING" : s.phase == Phase::REGISTER ? "REGISTERING" : s.phase == Phase::CONNECT ? "CONNECTING" : "BOOT";
-  text(PX, y, ph, s.phase == Phase::HOST && s.alive ? C_GREEN : (s.phase == Phase::DEAD ? C_DIM : C_AMBER), &fonts::Font2); y += 18;
-  if (s.phase == Phase::HOST) {
-    // energy bar: seconds of life, full at one hour
-    int64_t e = s.energy < 0 ? 0 : s.energy;
-    float fill = e >= 3600 ? 1.f : (float)e / 3600.f;
-    frame.drawRect(PX, y, PW, 9, C_DIM);
-    frame.fillRect(PX + 1, y + 1, (int)((PW - 2) * fill), 7, e < 120 ? C_RED : e < 600 ? C_AMBER : C_GREEN);
-    y += 12;
-    if (e >= 3600) snprintf(b, sizeof b, "%lld s  (%lld h %lld m)", (long long)e, (long long)(e / 3600), (long long)((e % 3600) / 60));
-    else snprintf(b, sizeof b, "%lld s left", (long long)e);
-    text(PX, y, b, C_TXT); y += 12;
-    snprintf(b, sizeof b, "%lu spk/s  step %llu", (unsigned long)r.spikesPerS, (unsigned long long)r.step);
-    text(PX, y, b, C_DIM); y += 12;
-    if (!s.coreEnabled) { text(PX, y, "core: not deployed", C_DIM); y += 12; text(PX, y, "local preview only", C_DIM); y += 12; }
-    else if (!s.anchored) { text(PX, y, "anchor: none yet", C_DIM); y += 12; }
-    else {
-      snprintf(b, sizeof b, "anchor blk %llu", (unsigned long long)s.lastAnchorBlock); text(PX, y, b, C_DIM); y += 12;
-      int hc = headingDeg((float)s.chainHeadX, (float)s.chainHeadY), hl = headingDeg(r.headX, r.headY);
-      if (hc >= 0) snprintf(b, sizeof b, "chain %d%c", hc, 0xF8); else snprintf(b, sizeof b, "chain --");
-      text(PX, y, b, C_MAG);
-      if (hl >= 0) snprintf(b, sizeof b, "local %d%c", hl, 0xF8); else snprintf(b, sizeof b, "local --");
-      text(PX + 60, y, b, C_TXT); y += 12;
-      uint32_t age = (millis() - s.lastAnchorMs) / 1000;
-      snprintf(b, sizeof b, "%lu s ago%s", (unsigned long)age, s.anchorMismatch ? " (resynced)" : ""); text(PX, y, b, C_DIM); y += 12;
+  int textWidth(const char* s, Font f) override { frame.setFont(fontOf(f)); return frame.textWidth(s); }
+  void setClip(int x, int y, int w, int h) override { frame.setClipRect(x, y, w, h); }
+  void clearClip() override { frame.clearClipRect(); }
+  int drawQR(int x, int y, int maxPx, const char* txt, Color fg, Color bg) override { return ::drawQR(frame, txt, x, y, maxPx, fg, bg); }
+  // The raster lives in its own sprite: new columns are drawn at the right edge after a scroll-left blit, then the
+  // sprite is pushed into the frame. Nothing pushes 155 x 220 pixels one by one.
+  void drawRaster(int x, int y, const Raster& r, const uint8_t* rowY, const Color* rowColor) override {
+    if (!s_rasterOk) { Painter::drawRaster(x, y, r, rowY, rowColor); return; }
+    uint32_t n = r.pushed - drawnPushed_;
+    if (!primed_ || r.pushed < drawnPushed_ || n >= (uint32_t)RASTER_COLS) {
+      rasterSprite.fillScreen(col::BG);
+      for (int k = 0; k < r.count; ++k) column(RASTER_COLS - r.count + k, r.column(k), rowY, rowColor);
+      primed_ = true;
+    } else if (n > 0) {
+      rasterSprite.scroll(-(int)n, 0);
+      for (uint32_t j = 0; j < n; ++j) column(RASTER_COLS - (int)n + (int)j, r.column(r.count - (int)n + (int)j), rowY, rowColor);
     }
-  } else if (s.phase == Phase::DEAD) {
-    snprintf(b, sizeof b, "brain preserved"); text(PX, y, b, C_TXT); y += 12;
-    snprintf(b, sizeof b, "at block %lu", (unsigned long)s.deadBlock); text(PX, y, b, C_DIM); y += 12;
-    std::string h = ethtx::toHex(s.brainHash, 6); h += "..";
-    text(PX, y, h.c_str(), C_DIM); y += 12;
-    text(PX, y, "resurrect on the site", C_AMBER); y += 12;
-  } else if (s.phase == Phase::WAIT) {
-    text(PX, y, "assign a fly to", C_DIM); y += 12;
-    text(PX, y, "this address on the", C_DIM); y += 12;
-    text(PX, y, "site (Hand it to a", C_DIM); y += 12;
-    text(PX, y, "body / another addr)", C_DIM); y += 12;
-  } else if (s.phase == Phase::REGISTER) {
-    text(PX, y, "send 0.05 BNB here,", C_DIM); y += 12;
-    text(PX, y, "then it registers", C_DIM); y += 12;
+    drawnPushed_ = r.pushed;
+    rasterSprite.pushSprite(&frame, x, y);
   }
-  y = 152;
-  char shortHex[16]; snprintf(shortHex, sizeof shortHex, "%.6s..%s", s.addrHex, s.addrHex[0] ? s.addrHex + 38 : "");
-  text(PX, y, shortHex, C_TXT); y += 12;
-  if (s.balanceKnown) { fmtBnb(s.balanceWei, s.balanceOverflow, b, sizeof b); text(PX, y, b, s.balanceWei < 5000000000000000ULL && !s.balanceOverflow ? C_RED : C_DIM); }
-  else text(PX, y, "balance ?", C_DIM);
-  if (s.flyTokens) text(PX + 70, y, "$FLY", C_AMBER);
-  y += 12;
-  drawDots(PX + 4, y + 4, wifi, s.ble);
-  // what the touch buttons under the screen do right now
-  y = 190;
-  if (s.candidate) { text(PX, y, "B: confirm hand-off", C_AMBER); text(PX, y + 10, "A/C: cancel", C_DIM); }
-  else if (s.scanning) { text(PX, y, "scanning BLE...", C_BLUE); }
-  else if (s.phase == Phase::HOST) { text(PX, y, "B: life  hold B: hand off", C_DIM); text(PX, y + 10, "hold A+C: show key", C_DIM); }
-  else if ((s.phase == Phase::WAIT || s.phase == Phase::DEAD) && s.flyTokens) { text(PX, y, s.hatchArmed ? "B again: HATCH" : "B: hatch a fly", s.hatchArmed ? C_AMBER : C_DIM); text(PX, y + 10, "hold A+C: show key", C_DIM); }
-  else { text(PX, y, "hold A+C: show key", C_DIM); }
-}
+  void reset() { primed_ = false; }
 
-// ---- the Life view: the brain host's stream (brain/HOST_PROTOCOL.md "What the pebble shows")
-
-// soft glows: nested discs drawn dim to bright, all outer layers before any inner one so overlaps stay soft
-struct Glow { int x, y; float radius; int r, g, b; float a; };
-static void drawGlows(const Glow* gs, int n) {
-  static const float ring[3] = {1.f, 0.62f, 0.32f}, lum[3] = {0.10f, 0.22f, 0.45f};
-  for (int layer = 0; layer < 3; ++layer)
-    for (int i = 0; i < n; ++i) {
-      float rad = gs[i].radius < 2 ? 2 : gs[i].radius;
-      frame.fillCircle(gs[i].x, gs[i].y, (int)(rad * ring[layer]), mix(gs[i].r, gs[i].g, gs[i].b, lum[layer] * gs[i].a));
+ private:
+  bool primed_ = false;
+  uint32_t drawnPushed_ = 0;
+  void column(int sx, const uint32_t* w, const uint8_t* rowY, const Color* rowColor) {
+    for (int i = 0; i < RASTER_WORDS; ++i) {
+      uint32_t v = w[i];
+      while (v) {
+        int b = __builtin_ctz(v); v &= v - 1;
+        int row = i * 32 + b;
+        if (row < RASTER_ROWS) rasterSprite.drawPixel(sx, rowY[row], rowColor[row]);
+      }
     }
+  }
+};
+
+static M5Painter s_painter;
+static Model* s_model = nullptr;      // ~6 KB: allocated once at init (PSRAM is fine, it is read every frame)
+static Speech s_speech;
+
+void uiInit() {
+  M5.Display.setBrightness(UI_BRIGHTNESS);
+  M5.Display.fillScreen(C_BG);
+  frame.setColorDepth(UI_COLOR_DEPTH);
+  frame.setPsram(true);
+  if (!frame.createSprite(320, 240)) {
+    Serial.println("[ui] frame sprite failed; drawing direct");
+  }
+  frame.setTextWrap(false);
+  rasterSprite.setColorDepth(16);
+  rasterSprite.setPsram(true);
+  s_rasterOk = rasterSprite.createSprite(RASTER_COLS, RASTER_ROWS + NEURON_TYPES) != nullptr;
+  if (s_rasterOk) { rasterSprite.setBaseColor(col::BG); rasterSprite.fillScreen(col::BG); }
+  else Serial.println("[ui] raster sprite failed; drawing the raster pixel by pixel");
+  s_model = new Model();
 }
 
-// the biggest font that fits the column for one word
-static const lgfx::IFont* fitFont(const char* word, int w) {
-  static const lgfx::IFont* fonts_[] = {&fonts::FreeSansBold12pt7b, &fonts::FreeSansBold9pt7b, &fonts::Font2, &fonts::Font0};
-  for (const lgfx::IFont* f : fonts_) { frame.setFont(f); if (frame.textWidth(word) <= w) return f; }
-  return &fonts::Font0;
+void uiFlash() { s_flashUntil = millis() + 120; }
+void uiFeedHint() { s_feedHintUntil = millis() + 6000; }
+
+// ---- feeding the Model
+
+static uint32_t hashPos(float x, float y) { uint32_t h = (uint32_t)(int32_t)lroundf(x * 10) * 2654435761u ^ (uint32_t)(int32_t)lroundf(y * 10) * 40503u; h ^= h >> 15; return h; }
+
+static void feedReplica(Model& m, const RingData& r) {
+  if (m.nNeurons == 0 && g_circuit.N > 0) {
+    m.nNeurons = g_circuit.N < RASTER_ROWS ? g_circuit.N : RASTER_ROWS;
+    for (int i = 0; i < m.nNeurons; ++i) { m.neuronType[i] = g_circuit.type[i]; m.neuronWedge[i] = g_circuit.wedge[i]; }
+    m.buildRows();
+  }
+  for (int i = 0; i < r.spkColN && i < RingData::SPK_COLS; ++i) m.raster.push(r.spkCols[i]);
+  for (int w = 0; w < WEDGES; ++w) m.wedgeAct[w] = r.act[w];
+  m.headX = r.headX; m.headY = r.headY; m.headMag = r.headMag;
+  m.spikesPerS = r.spikesPerS; m.step = r.step;
+  m.localHeadingDeg = headingDeg(r.headX, r.headY);
 }
 
-static void fmtHms(int64_t e, char* out, size_t n) {
-  if (e < 0) e = 0;
-  if (e >= 3600) snprintf(out, n, "%lldh %02lldm %02llds", (long long)(e / 3600), (long long)((e % 3600) / 60), (long long)(e % 60));
-  else if (e >= 60) snprintf(out, n, "%lldm %02llds", (long long)(e / 60), (long long)(e % 60));
-  else snprintf(out, n, "%lld s", (long long)e);
-}
-
-static void drawWorld(const HostView& h) {
+static void feedHost(Model& m, const HostView& h, const BodyState& s, uint32_t now, SpeechInput& in) {
+  static uint32_t lastFrames = 0; static float lastX = 0, lastY = 0; static double lastT = 0; static double lastEventT = -1; static uint64_t lastFly = 0;
   const hostframe::LiteFrame& f = h.frame;
-  const float scale = (float)WS / f.arena;
-  auto sx = [&](float x) { return WX + (int)((x + f.arena * 0.5f) * scale + 0.5f); };
-  auto sy = [&](float y) { return WY + (int)((f.arena * 0.5f - y) * scale + 0.5f); };
-  frame.fillRect(WX, WY, WS, WS, rgb(12, 14, 20));
-  frame.setClipRect(WX, WY, WS, WS);
-  // puffs of odor (fainter), food with its plume, the predator's halo
-  Glow gs[hostframe::MAX_PUFFS + hostframe::MAX_FOOD + 1]; int ng = 0;
-  for (int i = 0; i < f.npuffs; ++i) gs[ng++] = {sx(f.puffs[i].x), sy(f.puffs[i].y), 9 + 9 * f.puffs[i].strength, 150, 120, 230, 0.5f + 0.5f * f.puffs[i].strength};
+  if (s.flyId != lastFly) { lastFly = s.flyId; lastFrames = 0; lastEventT = -1; m.trailN = 0; m.trailHead = 0; m.speed = 0; }
+  if (!h.haveFrame) return;
+  m.x = f.x; m.y = f.y; m.heading = f.heading; m.arena = f.arena; m.realtime = f.realtime;
+  m.mode = (Mode)(f.mode <= hostframe::M_UNKNOWN ? f.mode : hostframe::M_UNKNOWN);
+  m.nfood = f.nfood;
   for (int i = 0; i < f.nfood; ++i) {
     float left = f.food[i].energy0 > 0 ? f.food[i].energy / f.food[i].energy0 : 1.f;
-    if (left < 0.15f) left = 0.15f;
-    if (left > 1) left = 1;
-    gs[ng++] = {sx(f.food[i].x), sy(f.food[i].y), 8 + 12 * left, 80, 220, 120, 1.f};
+    m.food[i] = {f.food[i].x, f.food[i].y, left < 0 ? 0 : left > 1 ? 1 : left, (int)f.food[i].energy, hashPos(f.food[i].x, f.food[i].y)};
   }
-  int pr = 3;
-  if (f.predator.present) {
-    pr = (int)(f.predator.size * scale * 0.5f); if (pr < 3) pr = 3;
-    gs[ng++] = {sx(f.predator.x), sy(f.predator.y), pr * 2.5f, 88, 196, 245, 0.8f};
-  }
-  drawGlows(gs, ng);
-  for (int i = 0; i < f.nfood; ++i) frame.fillCircle(sx(f.food[i].x), sy(f.food[i].y), 2, C_GREEN);
-  // the trail, oldest dimmest
-  if (h.trailN > 1) {
-    int px = 0, py = 0;
-    for (int i = 0; i < h.trailN; ++i) {
-      int k = (h.trailHead + HOST_TRAIL_LEN - h.trailN + i) % HOST_TRAIL_LEN;
-      int x = sx(h.trailX[k]), y = sy(h.trailY[k]);
-      if (i) { float a = 0.12f + 0.55f * (float)i / (float)h.trailN; frame.drawLine(px, py, x, y, mix(240, 180, 41, a)); }
-      px = x; py = y;
+  m.npuffs = f.npuffs;
+  for (int i = 0; i < f.npuffs; ++i) m.puffs[i] = {f.puffs[i].x, f.puffs[i].y, f.puffs[i].strength};
+  m.predator = f.predator.present; m.predX = f.predator.x; m.predY = f.predator.y; m.predSize = f.predator.size;
+  m.smell = 1 - expf(-f.rates.alpn / LIFE_SCALE_SMELL);
+  m.memory = 1 - expf(-(f.rates.kc + f.rates.mbon) / LIFE_SCALE_MEMORY);
+  m.sight = 1 - expf(-(f.rates.lc4L + f.rates.lc4R) / LIFE_SCALE_SIGHT);
+  m.steer = 1 - expf(-fabsf(f.rates.dna02L - f.rates.dna02R) / LIFE_SCALE_STEER);
+  m.taste = 1 - expf(-f.rates.grn / LIFE_SCALE_TASTE);
+  // the trail: the newest TRAIL_LEN of the host's ring
+  m.trailN = 0; m.trailHead = 0;
+  int take = h.trailN < TRAIL_LEN ? h.trailN : TRAIL_LEN;
+  for (int i = 0; i < take; ++i) { int k = (h.trailHead + HOST_TRAIL_LEN - take + i) % HOST_TRAIL_LEN; m.pushTrail(h.trailX[k], h.trailY[k]); }
+  if (h.frames != lastFrames) {
+    // speed from successive frames (simulated seconds)
+    if (lastFrames && f.t_ms > lastT) { float dx = f.x - lastX, dy = f.y - lastY; float v = sqrtf(dx * dx + dy * dy) / (float)((f.t_ms - lastT) / 1000.0); m.speed = m.speed * 0.5f + v * 0.5f; }
+    lastX = f.x; lastY = f.y; lastT = f.t_ms; lastFrames = h.frames;
+    // new diary lines -> events (jumped / caught / ate)
+    double newest = lastEventT;
+    for (int i = 0; i < f.nevents; ++i) {
+      const hostframe::Event& e = f.events[i];
+      if (lastEventT >= 0 && e.t_ms > lastEventT) {
+        if (strstr(e.text, "jumped")) { m.jumpMs = now; in.jumpSeq++; }
+        else if (strstr(e.text, "caught")) { m.caughtMs = now; in.caughtSeq++; }
+        else if (strstr(e.text, "finished a food") || !strncmp(e.text, "ate ", 4)) { m.eatMs = now; in.ateSeq++; const char* w = strstr(e.text, "worth "); in.ateSecs = w ? atoi(w + 6) : 0; }
+      }
+      if (e.t_ms > newest) newest = e.t_ms;
     }
+    lastEventT = newest < 0 ? 0 : newest;
   }
-  // the predator: a blue dot
-  if (f.predator.present) frame.fillCircle(sx(f.predator.x), sy(f.predator.y), pr, C_BLUE);
-  // the fly: a red triangle along its heading (world y up, screen y down)
-  {
-    float a = f.heading, c = cosf(a), sn = sinf(a);
-    int x = sx(f.x), y = sy(f.y);
-    int tx = x + (int)(c * 8), ty = y - (int)(sn * 8);
-    int bx = x - (int)(c * 4), by = y + (int)(sn * 4);
-    int lx = bx - (int)(sn * 4), ly = by - (int)(c * 4);
-    int rx = bx + (int)(sn * 4), ry = by + (int)(c * 4);
-    frame.fillTriangle(tx, ty, lx, ly, rx, ry, f.alive ? C_RED : C_DIM);
-  }
-  frame.clearClipRect();
-  frame.drawRect(WX, WY, WS, WS, rgb(64, 68, 84));
-  // where the neurons are
-  char b[48]; snprintf(b, sizeof b, "brain on host %c %.1fx real time", 0xFA, f.realtime);
-  text(WX + 4, WY + WS - 10, b, C_DIM);
-}
-
-static void drawLife(const BodyState& s, const HostView& h, bool wifi) {
-  const hostframe::LiteFrame& f = h.frame;
-  drawWorld(h);
-  // the newest diary line under the world
-  textFit(WX, WY + WS + 3, h.diary[0] ? h.diary : "", WS, C_TXT);
-
-  char b[64];
-  int y = 4;
-  textFit(LX, y, s.flyName[0] ? s.flyName : "Fly", LW, C_TXT, &fonts::Font2); y += 18;
-  snprintf(b, sizeof b, "#%llu  gen %lu", (unsigned long long)s.flyId, (unsigned long)f.generation);
-  text(LX, y, b, C_DIM); y += 12;
-  text(LX, y, f.alive ? "ALIVE" : "DEAD", f.alive ? C_GREEN : C_RED, &fonts::Font2); y += 18;
-  // energy from the frame (the host's clock), full at one hour
-  int64_t e = (int64_t)(f.energy < 0 ? 0 : f.energy);
-  float fill = e >= 3600 ? 1.f : (float)e / 3600.f;
-  frame.drawRect(LX, y, LW, 9, C_DIM);
-  frame.fillRect(LX + 1, y + 1, (int)((LW - 2) * fill), 7, e < 120 ? C_RED : e < 600 ? C_AMBER : C_GREEN);
-  y += 12;
-  fmtHms(e, b, sizeof b); text(LX, y, b, C_TXT); y += 14;
-  // what it is doing, big
-  const char* word = hostframe::modeWord(f.mode);
-  if (!*word) word = f.modeText[0] ? f.modeText : "?";
-  const char* line1 = word; const char* line2 = nullptr;
-  if (f.mode == hostframe::M_SURGE) { line1 = "following"; line2 = "a scent"; }
-  uint16_t wc = f.mode == hostframe::M_FLEE ? C_BLUE : f.mode == hostframe::M_EAT ? C_GREEN : f.mode == hostframe::M_SURGE ? C_AMBER : C_TXT;
-  const lgfx::IFont* bf = fitFont(line1, LW);
-  text(LX, y, line1, wc, bf); y += (bf == &fonts::FreeSansBold12pt7b ? 22 : bf == &fonts::FreeSansBold9pt7b ? 17 : 16);
-  if (line2) { text(LX, y, line2, wc, &fonts::FreeSansBold9pt7b); y += 17; }
-  else y += 4;
-  if (y < 120) y = 120;
-  // the brain lighting up by region
-  struct Bar { const char* name; float v; };
-  float steer = fabsf(f.rates.dna02L - f.rates.dna02R);
-  Bar bars[5] = {{"smell", 1 - expf(-f.rates.alpn / LIFE_SCALE_SMELL)}, {"memory", 1 - expf(-(f.rates.kc + f.rates.mbon) / LIFE_SCALE_MEMORY)},
-                 {"sight", 1 - expf(-(f.rates.lc4L + f.rates.lc4R) / LIFE_SCALE_SIGHT)}, {"steer", 1 - expf(-steer / LIFE_SCALE_STEER)},
-                 {"taste", 1 - expf(-f.rates.grn / LIFE_SCALE_TASTE)}};
-  for (int i = 0; i < 5; ++i) {
-    float v = bars[i].v; if (v < 0) v = 0; if (v > 1) v = 1;
-    text(LX, y, bars[i].name, C_DIM);
-    int bx = LX + 40, bw = LW - 40;
-    frame.drawRect(bx, y + 1, bw, 6, C_GREY);
-    frame.fillRect(bx + 1, y + 2, (int)((bw - 2) * v), 4, mix(240, 180, 41, 0.35f + 0.65f * v));
-    y += 10;
-  }
-  y += 2;
-  snprintf(b, sizeof b, "%lu jumps  %lu hits", (unsigned long)f.jumps, (unsigned long)f.hits);
-  text(LX, y, b, C_DIM); y += 11;
-  drawDots(LX + 4, y + 4, wifi, s.ble);
-  text(LX + 90, y, h.wsMode ? "ws" : "poll", h.connected ? C_GREEN : C_DIM);
-  y += 12;
-  if (s.candidate) { text(LX, y, "B: confirm hand-off", C_AMBER); }
-  else if (s.scanning) { text(LX, y, "scanning BLE...", C_BLUE); }
-  else { text(LX, y, "B: compass  hold B: hand off", C_DIM); }
 }
 
 int uiFrame(const BodyState& s, const RingData& r, const HostView& h, bool wifi, bool hostingRing, bool life) {
-  bool flash = millis() < s_flashUntil;
-  frame.fillScreen(flash ? rgb(120, 20, 20) : (s.phase == Phase::DEAD ? rgb(28, 28, 30) : C_BG));
+  (void)hostingRing;
+  const uint32_t now = millis();
+  Model& m = *s_model;
+  static Phase prevPhase = Phase::BOOT;
+  static uint64_t prevAnchorBlock = 0; static uint32_t prevFedSeq = 0, prevPokeSeq = 0; static bool prevFresh = false;
+  static SpeechInput in;
 
+  m.nowMs = now;
+  m.moments.expire(now);
+  // ---- who
+  strlcpy(m.flyName, s.flyName, sizeof m.flyName); m.flyId = s.flyId;
+  strlcpy(m.pebbleName, s.bodyName, sizeof m.pebbleName);
+  strlcpy(m.addrHex, s.addrHex, sizeof m.addrHex);
+  snprintf(m.flyUrl, sizeof m.flyUrl, "%s/fly/?id=%llu", SITE_URL, (unsigned long long)s.flyId);
+  strlcpy(m.status, s.status, sizeof m.status); m.statusAgeMs = s.statusMs ? now - s.statusMs : 0xFFFFFFFFu; m.txPending = s.txPending;
+  // ---- the fly
+  bool fresh = hostFresh(h, now) && h.frame.generation == s.generation;
+  m.hasFly = (s.phase == Phase::HOST || s.phase == Phase::DEAD) && s.flyId != 0;
+  m.alive = s.phase == Phase::HOST ? s.alive : false;
+  m.hostFresh = fresh; m.hostKnown = h.originKnown; m.hostOffline = s.phase == Phase::HOST && h.originKnown && !fresh;
+  m.generation = s.generation; m.energy = s.energy;
+  m.registered = s.phase != Phase::REGISTER && s.phase != Phase::CONNECT && s.phase != Phase::BOOT;
+  m.assignmentPending = s.assignmentPending; m.flyTokens = s.flyTokens; m.hatchArmed = s.hatchArmed;
+  m.coreEnabled = s.coreEnabled; m.anchored = s.anchored; m.lastAnchorBlock = s.lastAnchorBlock; m.deadBlock = s.deadBlock;
+  m.chainHeadingDeg = s.anchored ? headingDeg((float)s.chainHeadX, (float)s.chainHeadY) : -1;
+  m.wifi = wifi; m.ble = s.ble; m.wsMode = h.wsMode; m.hostConnected = h.connected;
+  m.candidate = s.candidate; m.scanning = s.scanning; strlcpy(m.neighbourShort, s.neighbourShort, sizeof m.neighbourShort);
+  feedReplica(m, r);
+  feedHost(m, h, s, now, in);
+  if (!h.haveFrame || !m.hasFly) { m.nfood = 0; m.npuffs = 0; m.predator = false; m.mode = Mode::UNKNOWN; }
+  // ---- events -> moments
+  if (s.phase == Phase::HOST && prevPhase != Phase::HOST) { m.hatchMs = now; s_painter.reset(); m.raster.clear(); }
+  if (s.phase != Phase::HOST && s.phase != Phase::DEAD) m.hatchMs = 0;
+  if (s.lastAnchorBlock != prevAnchorBlock && s.anchored && s.lastAnchorBlock) { m.moments.add(Moment::ANCHORED, now); in.anchorSeq++; in.anchorBlock = s.lastAnchorBlock; }
+  prevAnchorBlock = s.lastAnchorBlock;
+  if (s.fedSeq != prevFedSeq) { m.moments.add(Moment::FED, now); in.fedSeq = s.fedSeq; in.fedSecs = s.fedSecs; strlcpy(in.fedBy, s.fedBy, sizeof in.fedBy); }
+  prevFedSeq = s.fedSeq;
+  if (s.pokeSeq != prevPokeSeq) { m.moments.add(Moment::POKED, now); in.pokeSeq = s.pokeSeq; strlcpy(in.pokeBy, s.pokeBy, sizeof in.pokeBy); in.pokeChannel = s.pokeChannel; in.pokeParam = s.pokeParam; }
+  prevPokeSeq = s.pokeSeq;
+  if (prevFresh && !fresh && s.phase == Phase::HOST) m.moments.add(Moment::STREAM_LOST, now);
+  prevFresh = fresh;
+  static uint32_t prevFlashUntil = 0;
+  if (s_flashUntil != prevFlashUntil) { prevFlashUntil = s_flashUntil; m.caughtMs = now; }   // the spider sensor: the same red flash + shake
+  // ---- speech
+  in.hasFly = m.hasFly; in.alive = m.alive; in.hatching = m.hatchMs && now - m.hatchMs < HATCH_MS + 800;
+  in.hostOffline = m.hostOffline; in.mode = m.mode; in.energy = m.energy;
+  in.eating = flyStateOf(m) == FlyState::EATING;
+  in.foodNear = false; for (int i = 0; i < m.nfood; ++i) { float dx = m.food[i].x - m.x, dy = m.food[i].y - m.y; if (dx * dx + dy * dy < 100.f) in.foodNear = true; }
+  in.predatorNear = m.predator && ((m.predX - m.x) * (m.predX - m.x) + (m.predY - m.y) * (m.predY - m.y) < 1600.f);
+  s_speech.update(now, in);
+  strlcpy(m.speech, s_speech.line(), sizeof m.speech);
+  // ---- the page
+  if (now < s_feedHintUntil && m.hasFly) m.page = Page::FEED_HINT;
+  else if (s.phase == Phase::DEAD) m.page = Page::DEAD;
+  else if (s.phase == Phase::HOST) m.page = (m.hatchMs && now - m.hatchMs < HATCH_MS + 800) ? Page::HATCHING : (life && fresh) ? Page::LIFE : Page::NEURONS;
+  else m.page = Page::WAITING;
+  prevPhase = s.phase;
+
+  drawScreen(s_painter, m);
+
+  // a finger on the halo (Neurons page) cues the wedge under it, as the ring did
   int touchWedge = -1;
-  if (s.phase == Phase::HOST && life) {
-    drawLife(s, h, wifi);
-    frame.drawFastHLine(0, NARR_Y - 4, 320, C_GREY);
-    textFit(4, NARR_Y, s.status[0] ? s.status : "", 312, s.txPending ? C_AMBER : C_TXT, &fonts::Font2);
-    frame.pushSprite(0, 0);
-    return -1;
-  }
-  if (s.phase == Phase::HOST) {
-    drawRing(r, s, hostingRing && s.alive);
-    if (!hostFresh(h, millis()) || h.frame.generation != s.generation) text(4, 16, h.originKnown ? "brain host offline" : "no brain host", rgb(200, 90, 70));
-    // a finger on the ring cues the wedge under it (like the site's poke)
+  if (m.page == Page::NEURONS) {
     auto t = M5.Touch.getDetail();
     if (t.isPressed() && t.y < 240) {
-      float dx = t.x - CX, dy = -(t.y - CY), d = sqrtf(dx * dx + dy * dy);
-      if (d >= R_IN - 8 && d <= R_OUT + 10) {
+      const int cx = NEURONS_COL_X + NEURONS_COL_W / 2, cy = 62;
+      float dx = t.x - cx, dy = -(t.y - cy), d = sqrtf(dx * dx + dy * dy);
+      if (d >= 16 && d <= 52) {
         float a = atan2f(dy, dx); if (a < 0) a += 6.2831853f;
         touchWedge = ((int)(a / (6.2831853f / 16))) & 15;
-        float a0 = touchWedge * 22.5f;
-        frame.drawArc(CX, CY, R_IN - 3, R_OUT + 3, 360.f - (a0 + 22.5f), 360.f - a0, C_TXT);
+        frame.drawCircle(cx, cy, 43, C_TXT);
       }
     }
-  } else if (s.phase == Phase::DEAD) {
-    char url[96]; snprintf(url, sizeof url, "%s/fly/?id=%llu", SITE_URL, (unsigned long long)s.flyId);
-    drawQR(frame, url, 22, 30, 160, rgb(30, 30, 32), C_TXT);
-    text(102, 196, "scan to resurrect", C_DIM, &fonts::Font0, textdatum_t::top_center);
-  } else {
-    // no fly: the pebble's address as a QR (send BNB / assign a fly to it)
-    drawQR(frame, s.addrHex[0] ? s.addrHex : "0x", 30, 22, 150, rgb(0, 0, 0), C_TXT);
-    text(104, 178, s.addrHex, C_DIM, &fonts::Font0, textdatum_t::top_center);
   }
-  drawPanel(s, r, wifi);
-  // narration
-  frame.drawFastHLine(0, NARR_Y - 4, 320, C_GREY);
-  textFit(4, NARR_Y, s.status[0] ? s.status : "", 312, s.txPending ? C_AMBER : C_TXT, &fonts::Font2);
   frame.pushSprite(0, 0);
   return touchWedge;
 }
 
-// ---- modal pages
+// ---- modal pages (unchanged)
 
 // The ASCII fly from brand/fly.txt, drawn as a silhouette: Font0 scaled so 57 columns fit in 320 px.
 static void drawAsciiFly(int cx, int top, uint16_t color) {

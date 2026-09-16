@@ -23,9 +23,13 @@ firmware/
   lib/rpc                 JSON-RPC over TLS + FlyRegistry / FlyCore wrappers (incl. bodies(addr))  (native mock test)
   lib/hostframe           the brain host protocol: lite frame + checkpoint payload parsers (ArduinoJson),
                           auth digest/signature, HTTP Date parser                                (native test)
-  src/                    the body: main (UI loop), chain task, host task, replica task, sensors, BLE, wallet, net, ui
+  lib/screen              the screen (UI.md): the fly creature, the pages, the speech rules, drawn on an abstract
+                          Painter from a Model; pure C++, no Arduino                             (native test)
+  src/                    the body: main (UI loop), chain task, host task, replica task, sensors, BLE, wallet, net,
+                          ui (the Painter on the M5GFX sprite + the Model feeder)
   fixtures/               generated tables and test vectors (tools/*.py)
-  test/                   test_core, test_eth, test_rpc, test_host — `pio test -e native`
+  test/                   test_core, test_eth, test_rpc, test_host, test_screen — `pio test -e native`
+  screens/                test_screen's page renders (gitignored); tools/ppm2png.py -> ../brand/pebble_screens/*.png
 ```
 
 ## 1. Build and flash
@@ -91,7 +95,20 @@ HOST       replica task: 14 steps/s with sensor stimuli; chain task:
              every ANCHOR_EVERY_S  (FLY_CORE set)  stimulate(id, dominant cue since the last anchor, strength, 16)
                                                    or tick(id, 16); wait for the receipt; core(id) -> setState;
                                                    the same anchor is replayed on a shadow core and compared: the
-                                                   screen says "(resynced)" if the EVM and the pebble disagreed
+                                                   narration says "chain differs, resynced" if the EVM and the
+                                                   pebble disagreed (a poke since the last anchor, or a kernel drift)
+             every POLL_EVERY_S                    fly(id) (feeds, a hand-off, a death or commit whose receipt was
+                                                   missed), then the poke watch: eth_blockNumber + eth_getLogs of
+                                                   FlyCore's Stimulated(id, by, …) events since the last look, on the
+                                                   node filtered by the event and the id; one by anyone but this body
+                                                   is a poke: pokeSeq/pokeBy/pokeChannel for the screen (the ice
+                                                   bolt, "0x8a12..9f3c poked me: shock!"), a sound, a narration line.
+                                                   Scans overlap by POKE_OVERLAP_BLOCKS with the newest log
+                                                   remembered (no double telling), a gap over POKE_LOOKBACK_BLOCKS is
+                                                   skipped, and an RPC that refuses eth_getLogs (the bnbchain
+                                                   dataseeds do) is retried every POKE_RETRY_S after
+                                                   POKE_FAIL_BACKOFF failures: pokes, like the feeder's name, need an
+                                                   RPC that serves logs
              every COMMIT_EVERY_S                  fly(id) first (a feed since the last poll goes into the energy), then
                                                    with the brain host reachable: GET /fly/<id>/checkpoint (signed) and
                                                    commit(id, <exactly the payload's stateRoot, memoryRoot, stateURI,
@@ -166,37 +183,51 @@ DEAD       grey screen, brain hash, QR to SITE_URL/fly/?id=N, low tone; keeps po
 ```
 
 A frame or a `/final` payload whose `generation` differs from the registry record's is ignored (after a
-resurrection the host may still stream the previous life's death for a while); the Compass view then says
+resurrection the host may still stream the previous life's death for a while); the Neurons page then says
 "brain host offline" until the new life's frames arrive.
 
-Buttons (the three touch areas under the screen, A B C from left to right):
+Buttons (the three touch areas under the screen, A B C from left to right; UI.md "Buttons"):
 
 | Gesture | When | Effect |
 |---|---|---|
 | hold A + C for 3 s | any time, once per boot | shows the private key (hex + QR) for backup |
-| B | hosting a fly | toggles Life / Compass (Life needs fresh frames; stale > 3 s falls back to the Compass by itself) |
-| hold B | hosting a fly | BLE scan 3 s, shows the strongest neighbour pebble |
-| B again | neighbour shown (20 s window) | `assign(id, neighbour)`; the neighbour accepts within one of its polls |
-| A or C | neighbour shown | cancel |
-| B, then B again within 8 s | no fly, pebble holds >= 1 $FLY | hatch: `approve` (if needed), `mint("Pebble xxxx")`, `assign(id, me)`, accept |
-| touch the ring | hosting, Compass view | cue the wedge under the finger (also sent to the host as a cue) |
+| A | hosting a fly (or dead) | the feed hint page for 6 s: the address as a QR + the fly page URL |
+| B | hosting a fly | toggles Life / Neurons (Life needs fresh frames; stale > 3 s falls back to Neurons by itself) |
+| hold C | hosting a fly | BLE scan 3 s, shows the strongest neighbour pebble |
+| C again | neighbour shown (20 s window) | `assign(id, neighbour)`; the neighbour accepts within one of its polls |
+| A or B | neighbour shown | cancel |
+| C, then C again within 8 s | no fly, pebble holds >= 1 $FLY | hatch: `approve` (if needed), `mint("Pebble xxxx")`, `assign(id, me)`, accept |
+| touch the halo | hosting, Neurons page | cue the wedge under the finger (also sent to the host as a cue) |
 
-Screens. **Life** (default while the host's frames are fresh): left, the fly's world top-down in a dark panel:
-the arena border, the trail (oldest dimmest), food dots with a soft green plume glow sized by what is left of them,
-odor puffs as fainter violet glows, the predator as a blue dot, the fly as a red triangle pointing along its
-heading, and the line "brain on host · 0.8x real time" so nobody mistakes where the neurons are; under the panel
-the newest diary line. Right: fly name and id, ALIVE with the generation, energy bar with h/m/s from the frame, a
-big word for what it is doing (wandering / following a scent / casting / eating / fleeing / still), five short bars
-for the brain lighting up by region: smell (ALPN), memory (KC + MBON), sight (LC4 L + R), steering (|DNa02 L − R|),
-taste (GRN), each `1 − exp(−rate / LIFE_SCALE_*)`, then jumps/hits, Wi-Fi/BLE dots, "ws"/"poll" (green while
-connected) and the button hints. **Compass** (B, or automatically when frames go stale): the 16-wedge ring shaded
-amber→red by the EPG bump (mean membrane potential per wedge, like the site), a faint blue outer ring for the
-heading histogram, the white needle = local population vector, the thin magenta line = the on-chain vector at the
-last anchor, the fly glyph turned to the heading, the active stimulus under the ring, labelled "on-chain" (and
-"brain host offline" / "no brain host" when there are no fresh frames). Right: fly name and id, ALIVE/DEAD, energy
-bar and seconds left, spikes/s and step, last anchor block with "chain N°" vs "local N°", the pebble's short
-address, BNB balance, Wi-Fi/BLE dots, and what the buttons do. Bottom of both: one line of narration (status / tx
-hashes / errors). No fly: the address as a QR.
+Screens (the design is [UI.md](UI.md); every page is drawn by `lib/screen` from a `Model` that `src/ui.cpp` fills,
+so the same code renders natively in `test/test_screen` — the PNGs in `../brand/pebble_screens/` are those renders).
+**Life** (default while the host's frames are fresh): the fly's world, camera on the fly, 70 body lengths across:
+a faint grid, the arena wall when near, the fading trail, each food as an amber blob with its seconds and a plume
+of amber particles drifting downwind, odor puffs as fainter bursts, the predator as a soft ice shadow, and the fly
+itself — a creature drawn from primitives (striped abdomen, thorax, big red eyes, antennae, six legs, wings) that
+walks, sniffs, casts, eats, jumps, flees, shakes when caught, dims when starving — plus "brain on host · 0.8x".
+Right: name and id, alive · gen, the one big word (WANDERING / FOLLOWING A SCENT / CASTING / EATING / FLEEING /
+JUMPED! / CAUGHT / STILL), the belly bar with h/m and a hunger word, five tiny thought bars (smell = ALPN, memory =
+KC + MBON, sight = LC4 L + R, steer = |DNa02 L − R|, taste = GRN, each `1 − exp(−rate / LIFE_SCALE_*)`), Wi-Fi and
+ws/poll dots, the last anchor block with a heart that pulses while a tx is in flight, and the hand-off prompt
+("C: hand to 9f3c") while a neighbour is shown. **Neurons** (B, or automatically when frames go stale): the live
+raster of the 155 on-chain neurons — one column per replica tick, one pixel per spike, rows grouped by cell type
+(EPG amber, PEG dim amber, PEN red, Δ7 ice), the legend and, on its own row under it, "brain host offline" / "no
+brain host" — and the fly's head from above inside a 16-wedge halo glowing with the EPG bump, the local needle
+(ink) and the chain's (ice), "chain N°" / "local N°", the anchor block, spikes/s and step. **Waiting**: the
+pulsing egg (a small crack and "a fly is on its way" while an assignment to this pebble is being accepted), the
+pebble's name, the address and its QR, the hatch hint. **Dead**: the fly on its back, DEAD, "brain preserved · block N", the QR of the fly
+page. **Hatching**: the egg cracks and the fly steps out (1.5 s after an accept). Every page ends with the speech
+strip: one first-person line ("I smell something…", "there!", "where did it go?", "yum", "jumped!", "a shadow!",
+"ouch", "getting hungry…", "fed 600 s by 0x8a… thanks", "anchored my neurons on-chain · block N", "0x8a12..9f3c
+poked me: shock!" (or "a cue on wedge 4" / "turn left!"), "my brain host is away; my compass still works", "waiting
+for a fly…", "resurrect me?"), newest wins, each held ≥ 2.5 s; long lines slide. Moments (2 s overlays): amber
+sparkles on a feed, an ice ring / halo flash on an anchor, an ice bolt on a poke, a "host?" tag when the stream is
+lost. The narration line (tx hashes, errors) shows small at the top of the world / under the raster while it is
+fresh (12 s). The middle dot and the degree sign are drawn by `lib/screen` itself (`drawLabel`), not asked of the
+fonts: Font2 has no such glyphs and Font0's sit behind M5GFX's cp437 flag; every string a page draws goes through
+`drawLabel`, which hands the fonts printable ASCII only (anything else shows as `?`), and the native painter fails
+the test on any other byte.
 
 ## 4. Chain cadence and gas (config.h)
 
@@ -209,7 +240,8 @@ interactions it handed over), `HOST_HTTP_BUSY_WAIT_MS` 100, `COMMIT_RETRY_S` 60 
 held checkpoint payload whose send failed is re-sent that often, and dropped after that many reverts),
 `HOST_ORIGIN_REFRESH_S` 300, `HOST_ORIGIN_RETRY_S` 30,
 `HOST_WS_GIVEUP_MS` 20000, `HOST_WS_RETRY_MS` 60000, `HOST_SENSE_MIN_MS` 1000, `HOST_SHOCK_SIDE` "right",
-`HOST_TRAIL_LEN` 400, `LIFE_SCALE_*` (the Hz at which each Life bar is 63% full; calibrate on a live fly). Gas limits: registerBody 200k, accept 120k, assign 120k, interaction 120k, commit 300k,
+`HOST_TRAIL_LEN` 400, `LIFE_SCALE_*` (the Hz at which each Life bar is 63% full; calibrate on a live fly), the poke
+watch's `POKE_LOOKBACK_BLOCKS` 2000, `POKE_OVERLAP_BLOCKS` 8, `POKE_FAIL_BACKOFF` 3, `POKE_RETRY_S` 300. Gas limits: registerBody 200k, accept 120k, assign 120k, interaction 120k, commit 300k,
 died 250k, mint 400k, approve 80k, stimulate+tick 600k + 330k × steps (unused gas is refunded). A tx with no receipt
 after `RECEIPT_WAIT_S` (90 s) makes the pebble re-fetch its pending nonce before the next send. Load each pebble with
 0.05 BNB, and 2 $FLY if it should hatch.
@@ -225,41 +257,45 @@ after `RECEIPT_WAIT_S` (90 s) makes the pebble re-fetch its pending nonce before
 4. Send 0.05 BNB to the address. Within 20 s: "registering… tx 0x…", then "registered as Pebble xxxx" (BscScan:
    `BodyRegistered` from the pebble's address).
 5. On the site, open a fly you own → *Hand it to a body* → *Another body address…* → the pebble's address. Within a
-   poll: "fly #N assigned to this pebble", "accepting the fly… tx", then the ring lights up and the interaction
-   "woke up in Pebble xxxx (core only, …)" appears in the fly's history.
-6. Rotate the pebble: the bump rotates and the stimulus label reads "turn L x12" / "turn R …". If it turns the
-   wrong way set `GYRO_INVERT 1`. Hold it level and check "cue wN x2" appears every 2 s (magnetometer); adjust
+   poll: "fly #N assigned to this pebble", "accepting the fly… tx", then the egg hatches, the raster starts and the
+   interaction "woke up in Pebble xxxx (core only, …)" appears in the fly's history.
+6. Rotate the pebble (Neurons page): the halo's bump rotates with the turn stimuli. If it turns the wrong way set
+   `GYRO_INVERT 1`. Hold it level and check "cue wN x2" appears every 2 s (magnetometer); adjust
    `MAG_HEADING_OFFSET_DEG` until wedge 4 faces north when the pebble's left side points north (rotate it once
    through 360° first so the hard-iron centring settles).
 7. Magnets: landmark past the left sensor → "cue w4 x8" and "landmark on the left…" on the narration line + on
    BscScan (rate-limited to one per 10 s). Spider past G17 → red flash, "SHOCK x20", the bump collapses,
    interaction "shock".
-8. Frame rate: the ring should move smoothly (target 20 fps). If it stutters, set `UI_COLOR_DEPTH 8` (halves the
-   SPI push).
+8. Frame rate: the fly should walk smoothly (target 20 fps). If it stutters, set `UI_COLOR_DEPTH 8` (halves the
+   SPI push). The Neurons raster scrolls in its own PSRAM sprite (only new columns are drawn).
 9. With `FLY_CORE` set: after 45 s "anchoring cue… tx 0x…" then "anchored at block N: on-chain heading X deg";
-   the magenta needle appears; the panel shows "chain X° · local Y°". A "(resynced)" flag means the EVM state did
-   not match the pebble's replay (report it: it would be a kernel or fixture discrepancy).
+   the ice needle appears, the halo flashes, the fly says "anchored my neurons on-chain · block N"; the Neurons
+   page shows "chain X°" / "local Y°". "chain differs (…), resynced" means the EVM state did not match the
+   pebble's replay: expected right after a poke from the site (the narration says "it was poked" when the watch
+   saw it first), otherwise report it (a kernel or fixture discrepancy). Poke the fly from the site with another
+   wallet: within a poll the ice bolt, "0x8a12..9f3c poked me: shock!" and "poked by 0x8a12..9f3c: shock x20,
+   block N" on the narration line (needs an RPC that serves eth_getLogs; the dataseeds refuse it).
 10. Feed from the site: within a poll the pebble chirps, "fed 600 s by 0x8a..", the energy bar refills.
 11. After 10 min: "committing… tx", "committed at block N: step S, E s of life". Check on BscScan that stateRoot /
     stateURI are unchanged and brainStep advanced by the core steps.
 12. Let one starve (or feed only a little): at 0 s "reporting death… tx", the low tone, the grey DEAD page with the
     QR. Resurrect on the site, assign to the pebble again: it accepts and the ring returns with the same core state.
-13. Two pebbles: on the one hosting, hold B → "neighbour Pebble yyyy (-48 dBm): press B to hand off" → B →
+13. Two pebbles: on the one hosting, hold C → "neighbour Pebble yyyy (-48 dBm): press C to hand off" → C →
     "handing off… tx" → the other pebble accepts within its poll; the first goes back to WAIT.
-14. Hatch: send 2 $FLY to a pebble that has no fly, press B twice: "approving $FLY…", "hatching (mint)…",
+14. Hatch: send 2 $FLY to a pebble that has no fly, press C twice: "approving $FLY…", "hatching (mint)…",
     "hatched fly #N, assigning…", then it accepts its own fly.
 15. Battery: unplug; the pebble keeps running. Wi-Fi loss shows "wifi lost, reconnecting (the fly keeps running
     locally)" and the energy keeps counting; the next commit after reconnection carries the interval.
 16. Brain host (with `brain/flyhost.py` running and registered): within a poll of accepting, serial shows
     `[host] origin https://…` then `[host] ws wss://…/fly/N/ws?lite=1` and `[host] ws connected`; the Life view
-    appears (the fly moves, the diary updates, "brain on host · N.Nx real time"). Press B: the Compass ("on-chain");
-    B again: Life. Kill the host process: within 3 s the Compass comes back with "brain host offline"; the energy
+    appears (the fly walks, the speech strip talks, "brain on host · N.Nx"). Press B: the Neurons page; B again:
+    Life. Kill the host process: within 3 s the Neurons page comes back with "brain host offline"; the energy
     keeps counting from the last frame; restart the host: Life returns. Check the memory line in the serial log
     (`[heap] internal free …`) while the WebSocket, the host HTTPS and the RPC TLS connections are all up.
 17. Senses to the host: landmark magnet left → serial `[host] sense {"kind":"landmark","side":"left"} -> {"ok":true,…}`
-    and a violet puff appears on the left of the fly, which turns toward it; spider → a blue dot approaches, the
-    fly jumps (blip). Feed from the site: food appears in the world; when the fly finishes it, a chirp and the
-    diary line. Touch a wedge in the Compass view: a puff in that direction.
+    and an amber puff appears on the left of the fly, which turns toward it; spider → an ice shadow approaches, the
+    fly jumps (blip). Feed from the site: food appears in the world with its plume; when the fly finishes it, a
+    chirp and "600 s of life, nice". Touch a wedge of the halo on the Neurons page: a puff in that direction.
 18. Whole-brain commit: after 10 min "asking the brain host for a checkpoint…", "committing the host's
     checkpoint… tx", "committed at block N: step S, E s of life (whole brain)", then up to 3 "ate/jumped/caught: …
     tx" lines. On BscScan the commit carries the host's stateRoot / stateURI (ipfs://…) and the interactions
@@ -276,7 +312,8 @@ after `RECEIPT_WAIT_S` (90 s) makes the pebble re-fetch its pending nonce before
 
 - `pio run -e cores3`: compiles and links for the CoreS3 (the summary prints RAM/Flash).
 - `pio test -e native`: `test_core` replays flysim.py fixtures through `lib/flycore` (bit-exact), `test_eth` checks
-  the signer/ABI against eth_account vectors, `test_rpc` drives `lib/rpc` through a mock node: `fly(id)` and
+  the signer/ABI against eth_account vectors, `test_rpc` drives `lib/rpc` through a mock node (FlyCore's Stimulated
+  events too: the eth_getLogs filter sent, the decode, reorged logs dropped): `fly(id)` and
   `core(id)` decoding against eth_abi-encoded payloads, calldata of every wrapper, nonce/gas handling and a signed
   `accept(1)` / `stimulate(...)` byte-for-byte against eth_account, receipts, balances, error propagation;
   `test_host` parses the HOST_PROTOCOL.md lite frame and checkpoint/final payloads with the pebble's own parser
@@ -285,5 +322,17 @@ after `RECEIPT_WAIT_S` (90 s) makes the pebble re-fetch its pending nonce before
   address `Account._recover_hash` recovers (the host's check); plus the HTTP Date parser, `bodies(address)`, and
   the held checkpoint (`hostframe::Held`: pending until the chain's brainStep reaches the payload's, energy drained
   by the seconds since the fetch, `commitDue` retry cadence, millis() rollover).
+- `test_screen` renders every page of UI.md through `lib/screen` on a native RGB painter (the M5GFX glyphs
+  themselves, from `test/test_screen/fonts_gen.h`; real QR codes): life (surge with food, plume and predator;
+  eating; starving; caught; poked/jumped; the hand-off prompt), neurons (a raster from 400 real ticks of
+  `lib/flycore`; with the brain host offline), waiting (and with an assignment pending: the egg's crack), dead,
+  hatching, the feed hint and a creature sheet, into `screens/*.ppm`; asserts nothing draws outside 320×240, each
+  page paints > 2000 pixels, no byte outside printable ASCII reaches the painter (the device would draw a box or
+  the wrong glyph), a Life frame stays under 6000 primitive calls and 400 raster columns redraw in < 20 ms; and
+  checks the drawn middle dot / degree sign, the speech rules (newest wins, ≥ 2.5 s hold), the fly-state triggers,
+  the raster ring, the moments, that the hand-off prompt is drawn (and names C), that the "brain host offline" tag
+  never shares the legend's row, and that a pending assignment changes the egg.
+  `../.venv/bin/python tools/ppm2png.py` turns the renders into `../brand/pebble_screens/*.png` (2×) for review.
 - `tools/gen_rpc_vectors.py`, `tools/gen_eth_vectors.py`, `tools/gen_fixtures.py`, `tools/gen_host_vectors.py`
-  regenerate `fixtures/` (deterministic).
+  regenerate `fixtures/` (deterministic); `tools/gen_screen_fonts.py` regenerates the native font header from the
+  M5GFX sources in `.pio/libdeps/cores3/M5GFX` (run `pio run -e cores3` once first).

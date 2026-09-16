@@ -11,6 +11,7 @@
 #include "replica.h"
 #include "host.h"
 #include "keccak.h"
+#include "events.h"
 #include "../fixtures/params.h"
 
 using flycore::CH_NONE; using flycore::CH_CUE; using flycore::CH_TURN_LEFT; using flycore::CH_TURN_RIGHT; using flycore::CH_SHOCK;
@@ -50,6 +51,11 @@ struct Chain {
   // shadow of the chain's core state at the last anchor, replayed locally to check the two kernels agree
   flycore::Core* shadow = nullptr;
   bool haveShadow = false;
+  // the poke watch (checkPokes): the first block not scanned yet (0: starts with the next poll), the newest log
+  // told to the screen (scans overlap), and the back-off for an RPC that refuses eth_getLogs
+  uint64_t pokeCursor = 0, pokeSeenBlock = 0; uint32_t pokeSeenIndex = 0;
+  uint8_t pokeFailures = 0; uint32_t pokeFailMs = 0;
+  bool pokedSinceAnchor = false;        // a poke was seen since the last anchor: a replay mismatch there is expected
   // timers
   uint32_t lastPollMs = 0, lastAnchorMs = 0, lastCommitMs = 0, lastBalanceMs = 0, lastRegisterMs = 0;
   uint64_t scanCursor = 1;
@@ -232,6 +238,8 @@ struct Chain {
       g_state.anchored = true; g_state.chainStep = s.step; g_state.chainHeadX = s.headX; g_state.chainHeadY = s.headY;
       g_state.lastAnchorBlock = block; g_state.lastAnchorMs = millis(); g_state.anchorMismatch = mismatch;
     }
+    // a mismatch is either a stranger's stimulate since the last anchor (checkPokes reports those, with the
+    // address, from the Stimulated events) or a kernel / fixture discrepancy: it only resyncs and says so
     if (mismatch) Serial.println("[chain] local replay differs from the chain state: resynced");
     return true;
   }
@@ -241,6 +249,7 @@ struct Chain {
     haveFly = true; fly = f;
     chainEnergy = (int64_t)f.energy; energyEpochMs = millis();
     coreStepsSinceCommit = 0; history.clear(); haveShadow = false;
+    pokeCursor = 0; pokeSeenBlock = 0; pokeSeenIndex = 0; pokeFailures = 0;
     pendingCommit.active = false; held.clear(); lastDieTryMs = 0; dieReverts = 0; starving = false;
     lastAnchorMs = millis(); lastCommitMs = millis();
     std::string name; reg.flyName(id, name);
@@ -256,7 +265,7 @@ struct Chain {
     if (coreEnabled) syncReplica(0, false, CH_NONE, 0, 0, 0); else { Lock l(g_stateMutex); g_state.anchored = false; }
     replicaSetHosting(true);
     hostAdj = 0; hostFramesSeen = 0;
-    setPhase(Phase::HOST);
+    { Lock l(g_stateMutex); g_state.phase = Phase::HOST; g_state.assignmentPending = false; }   // the egg hatches: one frame, no crack-less gap
     if (hostOn) resolveHostOrigin(true);
     if (fresh) {
       char b[80]; snprintf(b, sizeof b, "woke up in %s (%llu s of life)", g_state.bodyName, (unsigned long long)f.energy);
@@ -289,14 +298,19 @@ struct Chain {
     setStatus("%s", why);
   }
 
-  // accept(id) then host it
+  // accept(id) then host it. The assignment is pending from here until the fly is hosted (startHosting clears the
+  // flag) or the accept gives up: the Waiting page's egg shows its crack meanwhile.
   void acceptAndHost(uint64_t fid) {
     uint8_t tx[32];
     id = fid;
-    if (!reg.accept(g_wallet, fid, tx)) { setStatus("accept failed: %s", rpc::lastError()); id = 0; return; }
-    if (waitReceipt(tx, "accepting the fly") != 1) { id = 0; return; }
+    { Lock l(g_stateMutex); g_state.assignmentPending = true; }
     rpc::FlyRecord f;
-    if (!reg.fly(fid, f) || !isMe(f.body)) { setStatus("accepted but the record disagrees; retrying"); id = 0; return; }
+    bool ok = false;
+    if (!reg.accept(g_wallet, fid, tx)) setStatus("accept failed: %s", rpc::lastError());
+    else if (waitReceipt(tx, "accepting the fly") != 1) {}
+    else if (!reg.fly(fid, f) || !isMe(f.body)) setStatus("accepted but the record disagrees; retrying");
+    else ok = true;
+    if (!ok) { id = 0; Lock l(g_stateMutex); g_state.assignmentPending = false; return; }
     startHosting(f, true);
   }
 
@@ -327,6 +341,7 @@ struct Chain {
       std::string by = fedBy();
       char b[80];
       if (by.empty()) snprintf(b, sizeof b, "fed %lld s", (long long)fed); else snprintf(b, sizeof b, "fed %lld s by %s", (long long)fed, by.c_str());
+      { Lock l(g_stateMutex); g_state.fedSeq++; g_state.fedSecs = (int32_t)fed; strlcpy(g_state.fedBy, by.c_str(), sizeof g_state.fedBy); }
       sendInteraction("fed", b);
     } else if ((int64_t)f.energy < expected) {
       // Only our own commit lowers a living fly's energy, and reconcileCommit handled that. What is left is a read
@@ -357,6 +372,53 @@ struct Chain {
     while ((k = arr.find("0x", k)) != std::string::npos) { if (n == 2) { by = arr.substr(k, 66); break; } n++; k += 2; }
     if (by.size() != 66) return "";
     return "0x" + by.substr(26, 4) + ".." + by.substr(62, 4);
+  }
+
+  // ---- pokes (UI.md "poked by a stranger"). FlyCore emits Stimulated(id, by, channel, param, strength, ...) for
+  //      every stimulus; one from anyone but the fly's body is a poke (the site's poke button; it burns $FLY). With
+  //      every poll while hosting: eth_blockNumber, then eth_getLogs over the blocks since the last look, filtered
+  //      on the node by the event and the fly id (a tiny request; our own anchors' events come back and are
+  //      dropped by address). The watch starts at the block hosting began, scans overlap by POKE_OVERLAP_BLOCKS
+  //      (load-balanced nodes lag each other) with the newest reported log remembered so nothing is said twice, a
+  //      gap longer than POKE_LOOKBACK_BLOCKS is skipped rather than replayed, and an RPC that refuses
+  //      eth_getLogs (the bnbchain dataseeds do) is retried only every POKE_RETRY_S.
+  void checkPokes() {
+    if (!coreEnabled || !id || g_state.phase != Phase::HOST) return;
+    uint32_t now = millis();
+    if (pokeFailures >= POKE_FAIL_BACKOFF && now - pokeFailMs < POKE_RETRY_S * 1000UL) return;
+    uint64_t bn;
+    if (!client.blockNumber(bn)) return;
+    if (!pokeCursor) { pokeCursor = bn + 1; return; }   // from now on: what happened before hosting is not news
+    uint64_t from = pokeCursor;
+    if (bn + 1 > from + POKE_LOOKBACK_BLOCKS) from = bn + 1 - POKE_LOOKBACK_BLOCKS;
+    if (from > bn) return;                              // a node behind the one that answered last time
+    std::vector<rpc::Stimulus> ev;
+    if (!rpc::stimulatedEvents(client, core.addr, id, from, 0, ev)) {
+      pokeFailMs = now;
+      if (++pokeFailures == POKE_FAIL_BACKOFF) Serial.printf("[chain] poke watch: eth_getLogs keeps failing (%s); this RPC may not serve logs, retrying every %d s\n", rpc::lastError(), POKE_RETRY_S);
+      return;
+    }
+    pokeFailures = 0;
+    uint64_t next = bn + 1 > POKE_OVERLAP_BLOCKS ? bn + 1 - POKE_OVERLAP_BLOCKS : 0;
+    pokeCursor = next > from ? next : from;
+    int pokes = 0; const rpc::Stimulus* last = nullptr;
+    for (const rpc::Stimulus& s : ev) {
+      if (isMe(s.by)) continue;                                                                          // our own anchor
+      if (s.block < pokeSeenBlock || (s.block == pokeSeenBlock && s.logIndex <= pokeSeenIndex)) continue;   // said already
+      pokes++; last = &s;
+    }
+    if (!pokes) return;
+    pokeSeenBlock = last->block; pokeSeenIndex = last->logIndex; pokedSinceAnchor = true;
+    char by[16]; rpc::shortAddress(last->by, by);
+    const char* what = last->channel == CH_SHOCK ? "shock" : last->channel == CH_CUE ? "cue" : last->channel == CH_TURN_LEFT ? "turn left" : last->channel == CH_TURN_RIGHT ? "turn right" : "stimulus";
+    {
+      Lock l(g_stateMutex);
+      g_state.pokeSeq += (uint32_t)pokes; strlcpy(g_state.pokeBy, by, sizeof g_state.pokeBy);
+      g_state.pokeChannel = last->channel; g_state.pokeParam = last->param;
+    }
+    g_sound = last->channel == CH_SHOCK ? SND_LOW : SND_BLIP;
+    if (last->channel == CH_CUE) setStatus("poked by %s: cue on wedge %u x%u, block %llu%s", by, (unsigned)last->param, (unsigned)last->strength, (unsigned long long)last->block, pokes > 1 ? " (and more)" : "");
+    else setStatus("poked by %s: %s x%u, block %llu%s", by, what, (unsigned)last->strength, (unsigned long long)last->block, pokes > 1 ? " (and more)" : "");
   }
 
   // ---- polling the registry
@@ -413,6 +475,7 @@ struct Chain {
       rpc::FlyRecord f;
       if (reg.fly(id, f)) { evaluate(id, f); { Lock l(g_stateMutex); g_state.rpcOk = true; } }
       else { setStatus("poll failed: %s", rpc::lastError()); Lock l(g_stateMutex); g_state.rpcOk = false; }
+      checkPokes();
     }
     if (g_state.phase == Phase::WAIT || g_state.phase == Phase::DEAD) {
       // scan for an assignment: ids 1..min(totalMinted, SCAN_MAX_ID), up to 40 per poll, round robin
@@ -458,9 +521,10 @@ struct Chain {
     uint64_t block = 0;
     if (waitReceipt(tx, what, &block) != 1) return;
     coreStepsSinceCommit += ANCHOR_STEPS;
+    bool poked = pokedSinceAnchor; pokedSinceAnchor = false;
     if (syncReplica(block, true, ch, param, strength, ANCHOR_STEPS)) {
       int hd = headingDeg((float)g_state.chainHeadX, (float)g_state.chainHeadY);
-      if (g_state.anchorMismatch) setStatus("anchored at block %llu: chain differs, resynced", (unsigned long long)block);
+      if (g_state.anchorMismatch) setStatus("anchored at block %llu: chain differs (%s), resynced", (unsigned long long)block, poked ? "it was poked" : "a poke not seen yet, or a kernel discrepancy");
       else if (hd >= 0) setStatus("anchored at block %llu: on-chain heading %d deg, %d steps", (unsigned long long)block, hd, ANCHOR_STEPS);
       else setStatus("anchored at block %llu, %d steps", (unsigned long long)block, ANCHOR_STEPS);
     }
@@ -624,7 +688,7 @@ struct Chain {
     g_state.scanning = false;
     if (found) {
       g_state.candidate = true; memcpy(g_state.neighbour, nb, 20); shortAddr(nb, g_state.neighbourShort); g_state.neighbourRssi = rssi; g_state.candidateMs = millis();
-      snprintf(g_state.status, sizeof g_state.status, "neighbour Pebble %s (%d dBm): press B to hand off", g_state.neighbourShort, rssi);
+      snprintf(g_state.status, sizeof g_state.status, "neighbour Pebble %s (%d dBm): press C to hand off", g_state.neighbourShort, rssi);
     } else snprintf(g_state.status, sizeof g_state.status, "no neighbour pebble found");
     g_state.statusMs = millis();
   }

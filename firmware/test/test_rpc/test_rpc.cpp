@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include "rpc.h"
+#include "events.h"
 #include "ethtx.h"
 #include "keccak.h"
 #include "../../fixtures/rpc_vectors.h"
@@ -19,6 +20,7 @@ struct Call { std::string method, params; };
 static std::vector<Call> s_calls;
 static std::string s_ethCallResult;        // JSON text answered to eth_call
 static std::string s_receipt = "null";
+static std::string s_logs = "[]";
 static std::string s_balance = "\"0x0\"";
 static std::string s_gasPrice = "\"0x1\"";
 static std::string s_nonce = "\"0x2a\"";
@@ -34,6 +36,7 @@ static bool mock(const std::string& method, const std::string& params, std::stri
   if (method == "eth_getBalance") { out = s_balance; return true; }
   if (method == "eth_blockNumber") { out = "\"0x75bcd15\""; return true; }
   if (method == "eth_getTransactionReceipt") { out = s_receipt; return true; }
+  if (method == "eth_getLogs") { out = s_logs; return true; }
   if (method == "eth_sendRawTransaction") {
     // params = ["0x…"]: decode, hash, answer the hash like a node
     std::string hex = params.substr(2, params.size() - 4);
@@ -343,6 +346,61 @@ void test_interaction_kind_and_data_encoding() {
   TEST_ASSERT_EQUAL_UINT(512, xs);
 }
 
+// ---- FlyCore's Stimulated events (the poke watch): the filter sent, the decode, reorged logs dropped
+void test_stimulated_events() {
+  // the topic is keccak of the event's signature (eth_utils.keccak agrees)
+  uint8_t sig[32]; rpc::stimulatedTopic(sig);
+  TEST_ASSERT_EQUAL_STRING("0xde65df0c74960f4f45c71f1cbf0af924fd35b980af741d7ab856f15a6710fc2c", ethtx::toHex(sig, 32).c_str());
+  uint8_t core[20]; Bytes t; ethtx::fromHex("0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3", t); memcpy(core, t.data(), 20);
+  // three logs as a node returns them: the body's own cue (free), a stranger's shock (burned 2000 FLY), a reorged one
+  std::string me = "0x000000000000000000000000" + ethtx::toHex(ETH_TEST_ADDR, 20, false);
+  std::string log1 = "{\"address\":\"0x90835aced9b2739658ff94abc7c0c45049ea49f3\",\"topics\":[\"" + ethtx::toHex(sig, 32) +
+                     "\",\"0x0000000000000000000000000000000000000000000000000000000000000041\",\"" + me + "\"],"
+                     "\"data\":\"0x" "0000000000000000000000000000000000000000000000000000000000000001"   // channel cue
+                     "0000000000000000000000000000000000000000000000000000000000000004"   // wedge 4
+                     "0000000000000000000000000000000000000000000000000000000000000008"   // x8
+                     "00000000000000000000000000000000000000000000000000000000000004d2"   // until step
+                     "0000000000000000000000000000000000000000000000000000000000000000\","  // burned 0
+                     "\"blockNumber\":\"0x746a5a8\",\"transactionHash\":\"0x11\",\"transactionIndex\":\"0x3\",\"blockHash\":\"0x22\",\"logIndex\":\"0x7\",\"removed\":false}";
+  std::string log2 = "{\"address\":\"0x90835aced9b2739658ff94abc7c0c45049ea49f3\",\"blockNumber\":\"0x746a5b0\",\"topics\":[\"" + ethtx::toHex(sig, 32) +
+                     "\",\"0x0000000000000000000000000000000000000000000000000000000000000041\","
+                     "\"0x0000000000000000000000008a12f00000000000000000000000000000009f3c\"],"
+                     "\"data\":\"0x" "0000000000000000000000000000000000000000000000000000000000000004"   // channel shock
+                     "0000000000000000000000000000000000000000000000000000000000000000"
+                     "0000000000000000000000000000000000000000000000000000000000000014"   // x20
+                     "00000000000000000000000000000000000000000000000000000000000004e2"
+                     "00000000000000000000000000000000000000000000006c6b935b8bbd400000\","  // 2000 FLY
+                     "\"logIndex\":\"0x0\",\"removed\":false}";
+  std::string log3 = log2; log3.replace(log3.find("\"removed\":false"), 15, "\"removed\":true");
+  s_logs = "[" + log1 + "," + log2 + "," + log3 + "]";
+  std::vector<rpc::Stimulus> ev;
+  TEST_ASSERT_TRUE(rpc::stimulatedEvents(client, core, 65, 122069000ULL, 0, ev));
+  // the filter: the core's address, the block range, the event topic and the fly id
+  const std::string& params = s_calls.back().params;
+  TEST_ASSERT_EQUAL_STRING("eth_getLogs", s_calls.back().method.c_str());
+  TEST_ASSERT_TRUE(params.find("\"address\":\"0x90835aced9b2739658ff94abc7c0c45049ea49f3\"") != std::string::npos);
+  TEST_ASSERT_TRUE(params.find("\"fromBlock\":\"0x746a008\"") != std::string::npos);
+  TEST_ASSERT_TRUE(params.find("\"toBlock\":\"latest\"") != std::string::npos);
+  TEST_ASSERT_TRUE(params.find("\"topics\":[\"0xde65df0c74960f4f45c71f1cbf0af924fd35b980af741d7ab856f15a6710fc2c\",\"0x0000000000000000000000000000000000000000000000000000000000000041\"]") != std::string::npos);
+  // two decoded (the reorged one dropped), oldest first
+  TEST_ASSERT_EQUAL(2, (int)ev.size());
+  TEST_ASSERT_EQUAL_MEMORY(ETH_TEST_ADDR, ev[0].by, 20);
+  TEST_ASSERT_EQUAL(1, ev[0].channel); TEST_ASSERT_EQUAL(4, ev[0].param); TEST_ASSERT_EQUAL(8, ev[0].strength);
+  TEST_ASSERT_EQUAL_UINT64(122070440ULL, ev[0].block); TEST_ASSERT_EQUAL(7, (int)ev[0].logIndex);
+  TEST_ASSERT_EQUAL(4, ev[1].channel); TEST_ASSERT_EQUAL(0, ev[1].param); TEST_ASSERT_EQUAL(20, ev[1].strength);
+  TEST_ASSERT_EQUAL_UINT64(122070448ULL, ev[1].block); TEST_ASSERT_EQUAL(0, (int)ev[1].logIndex);
+  char by[16]; rpc::shortAddress(ev[1].by, by);
+  TEST_ASSERT_EQUAL_STRING("0x8a12..9f3c", by);
+  // an explicit toBlock, and an empty answer
+  s_logs = "[]";
+  TEST_ASSERT_TRUE(rpc::stimulatedEvents(client, core, 65, 100, 120, ev));
+  TEST_ASSERT_EQUAL(0, (int)ev.size());
+  TEST_ASSERT_TRUE(s_calls.back().params.find("\"toBlock\":\"0x78\"") != std::string::npos);
+  // the transport failing is reported, not an empty list
+  s_fail = true;
+  TEST_ASSERT_FALSE(rpc::stimulatedEvents(client, core, 65, 100, 0, ev));
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_block_number_and_gas_price);
@@ -356,5 +414,6 @@ int main() {
   RUN_TEST(test_send_call_signs_like_eth_account);
   RUN_TEST(test_gas_price_is_capped);
   RUN_TEST(test_interaction_kind_and_data_encoding);
+  RUN_TEST(test_stimulated_events);
   return UNITY_END();
 }

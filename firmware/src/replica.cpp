@@ -146,6 +146,14 @@ static void replicaTask(void*) {
 
       TickResult r = c.tick(1);
       spikeWindow += r.spikes;
+      // this tick's spikes as one raster column for the Neurons page (Core::lastSpk); the UI drains the queue
+      {
+        if (g_ring.spkColN >= RingData::SPK_COLS) { memmove(g_ring.spkCols[0], g_ring.spkCols[1], sizeof g_ring.spkCols[0] * (RingData::SPK_COLS - 1)); g_ring.spkColN = RingData::SPK_COLS - 1; }
+        uint32_t* col = g_ring.spkCols[g_ring.spkColN++];
+        memset(col, 0, sizeof(uint32_t) * RingData::SPK_WORDS);
+        const int N = c.circuit().N < RingData::SPK_WORDS * 32 ? c.circuit().N : RingData::SPK_WORDS * 32;
+        for (int i = 0; i < N; ++i) if (c.lastSpk[i]) col[i >> 5] |= 1u << (i & 31);
+      }
       if (now - windowStartMs >= 1000) { g_ring.spikesPerS = spikeWindow; spikeWindow = 0; windowStartMs = now; }
       // a ~100 ms window of EPG spikes per wedge (about 1.4 steps at 14 steps/s): exponential decay
       for (int w = 0; w < WEDGES; ++w) { binsDecay[w] = binsDecay[w] * 0.5f + (float)c.lastBins[w]; g_ring.bins[w] = (uint32_t)(binsDecay[w] + 0.5f); }

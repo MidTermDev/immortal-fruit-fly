@@ -58,6 +58,10 @@ struct RingData {
   uint64_t step;
   uint8_t stimChannel, stimParam; uint16_t stimStrength; bool stimActive;
   int bump;                      // wedge with the highest activity, -1 if flat
+  // the Neurons page's raster: one column per replica tick, bit i = neuron i spiked (Core::lastSpk), newest last.
+  // The replica appends, the UI takes them all (and clears spkColN) when it copies the ring
+  static constexpr int SPK_COLS = 16, SPK_WORDS = 5;
+  uint32_t spkCols[SPK_COLS][SPK_WORDS]; uint8_t spkColN;
 };
 
 struct BodyState {
@@ -79,9 +83,14 @@ struct BodyState {
   bool txPending = false; char txHash[67] = "";
   bool scanning = false, candidate = false; uint8_t neighbour[20] = {0}; char neighbourShort[5] = ""; int neighbourRssi = 0; uint32_t candidateMs = 0;
   bool hatchArmed = false; uint32_t hatchArmedMs = 0; bool hatching = false;
+  bool assignmentPending = false;   // a fly is assigned to this body and the accept is in flight (UI.md: the egg's crack)
   uint8_t brainHash[32] = {0};
   uint32_t deadBlock = 0;
   bool showedKey = false;
+  // events for the screen's speech and moments (UI.md): a changed counter means it happened again
+  uint32_t fedSeq = 0; int32_t fedSecs = 0; char fedBy[16] = "";     // a feed seen on the registry ("0x8a12.." or "")
+  uint32_t pokeSeq = 0; char pokeBy[16] = "";                         // a Stimulated event on our core by anyone but this body ("0x8a12..9f3c")
+  uint8_t pokeChannel = 0, pokeParam = 0;                             //   its flycore channel (4 = shock, 1 = cue on wedge pokeParam, 2/3 = turn)
 };
 
 // The brain host's stream as the pebble sees it (brain/HOST_PROTOCOL.md; guarded by g_hostMutex). The host task

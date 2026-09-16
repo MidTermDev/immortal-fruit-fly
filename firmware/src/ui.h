@@ -1,13 +1,16 @@
-// The screen (HARDWARE.md §4.6), drawn on one PSRAM sprite per frame so nothing flickers.
+// The screen (UI.md, HARDWARE.md §4.6), drawn on one PSRAM sprite per frame so nothing flickers.
 #pragma once
 #include <stdint.h>
 #include <string>
 #include "pebble.h"
 
 void uiInit();
-// one frame from copies of the shared state; returns the wedge under a finger on the ring (or -1) for the senses.
-// `life` draws the Life view (the brain host's stream in h) instead of the Compass (the on-chain core ring).
+// one frame from copies of the shared state; returns the wedge under a finger on the halo (or -1) for the senses.
+// `life` asks for the Life page (the brain host's stream in h) instead of the Neurons page (the on-chain core's
+// raster); the pages themselves live in lib/screen (UI.md), ui.cpp only feeds the Model and paints on the sprite.
 int uiFrame(const BodyState& s, const RingData& r, const HostView& h, bool wifi, bool hostingRing, bool life);
+// button A: the feed hint page (address QR + the fly page URL) for 6 s
+void uiFeedHint();
 // full-screen modal pages
 void uiBootMessage(const char* line1, const char* line2 = nullptr);
 void uiShowKey(const std::string& privHex, const char* addr);   // blocks until a button is pressed

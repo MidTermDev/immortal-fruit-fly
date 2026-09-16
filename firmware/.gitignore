@@ -1,3 +1,5 @@
 # build output and the one file that must never be committed
 .pio/
 include/secrets.h
+# native renders of the pages (test_screen); the PNGs live in ../brand/pebble_screens
+screens/

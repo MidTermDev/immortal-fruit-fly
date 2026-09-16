@@ -32,7 +32,7 @@ SemaphoreHandle_t g_hostMutex = nullptr;
 QueueHandle_t g_hostSenseQueue = nullptr;
 volatile int g_sound = SND_NONE;
 rpc::Wallet g_wallet;
-static bool s_viewLife = true;   // button B: Life (the brain host's stream) or Compass (the on-chain core)
+static bool s_viewLife = true;   // button B: Life (the brain host's stream) or Neurons (the on-chain core's raster)
 
 void setStatus(const char* fmt, ...) {
   char b[sizeof g_state.status];
@@ -154,18 +154,21 @@ static void handleButtons(BodyState& s) {
     }
   } else bothSince = 0;
 
-  // hosting: B toggles Life / Compass; hold B to scan for a hand-off, B to confirm, A/C to cancel
+  // UI.md "Buttons": A = the feed hint page (6 s), B = Life <-> Neurons, C = hatch / hand-off
+  // hosting: hold C to scan for a hand-off, C to confirm, A/B to cancel
   if (s.phase == Phase::HOST) {
     if (s.candidate) {
-      if (M5.BtnB.wasClicked()) { Cmd c = Cmd::HANDOFF_CONFIRM; xQueueSend(g_cmdQueue, &c, 0); }
-      else if (M5.BtnA.wasClicked() || M5.BtnC.wasClicked() || millis() - s.candidateMs > HANDOFF_CONFIRM_S * 1000UL) { Cmd c = Cmd::HANDOFF_CANCEL; xQueueSend(g_cmdQueue, &c, 0); }
-    } else if (M5.BtnB.wasHold() && !s.scanning) { Cmd c = Cmd::HANDOFF_SCAN; xQueueSend(g_cmdQueue, &c, 0); }
+      if (M5.BtnC.wasClicked()) { Cmd c = Cmd::HANDOFF_CONFIRM; xQueueSend(g_cmdQueue, &c, 0); }
+      else if (M5.BtnA.wasClicked() || M5.BtnB.wasClicked() || millis() - s.candidateMs > HANDOFF_CONFIRM_S * 1000UL) { Cmd c = Cmd::HANDOFF_CANCEL; xQueueSend(g_cmdQueue, &c, 0); }
+    } else if (M5.BtnC.wasHold() && !s.scanning) { Cmd c = Cmd::HANDOFF_SCAN; xQueueSend(g_cmdQueue, &c, 0); }
     else if (M5.BtnB.wasClicked()) s_viewLife = !s_viewLife;
+    else if (M5.BtnA.wasClicked()) uiFeedHint();
     return;
   }
-  // hatch: B twice within HATCH_CONFIRM_S on a pebble that has $FLY and no fly
+  if (s.phase == Phase::DEAD && M5.BtnA.wasClicked()) uiFeedHint();
+  // hatch: C twice within HATCH_CONFIRM_S on a pebble that has $FLY and no fly
   if ((s.phase == Phase::WAIT || s.phase == Phase::DEAD) && s.flyTokens && !s.hatching) {
-    if (M5.BtnB.wasClicked()) {
+    if (M5.BtnC.wasClicked()) {
       Lock l(g_stateMutex);
       if (g_state.hatchArmed && millis() - g_state.hatchArmedMs <= HATCH_CONFIRM_S * 1000UL) {
         g_state.hatchArmed = false;
@@ -173,7 +176,7 @@ static void handleButtons(BodyState& s) {
         snprintf(g_state.status, sizeof g_state.status, "hatching: approve + mint + assign (1 $FLY)");
       } else {
         g_state.hatchArmed = true; g_state.hatchArmedMs = millis();
-        snprintf(g_state.status, sizeof g_state.status, "press B again within %d s to hatch a fly (burns 1 $FLY)", HATCH_CONFIRM_S);
+        snprintf(g_state.status, sizeof g_state.status, "press C again within %d s to hatch a fly (burns 1 $FLY)", HATCH_CONFIRM_S);
       }
     } else if (s.hatchArmed && millis() - s.hatchArmedMs > HATCH_CONFIRM_S * 1000UL) {
       Lock l(g_stateMutex); g_state.hatchArmed = false;
@@ -193,11 +196,11 @@ void loop() {
   BodyState s; copyState(s);
   handleButtons(s);
 
-  RingData r;
-  { Lock l(g_replicaMutex); r = g_ring; }
+  static RingData r;   // the raster columns make it ~400 bytes: a static copy
+  { Lock l(g_replicaMutex); r = g_ring; g_ring.spkColN = 0; }   // the UI takes this frame's raster columns
   static HostView h;   // ~5 KB: a static copy, not a stack one
   { Lock l(g_hostMutex); h = g_host; }
-  // the Life view while the host's frames are fresh (and the user did not switch to the compass); else the compass
+  // the Life page while the host's frames are fresh (and the user did not switch to the Neurons page); else Neurons
   bool life = s_viewLife && s.phase == Phase::HOST && hostFresh(h, millis()) && h.frame.generation == s.generation;
   touchWedge = uiFrame(s, r, h, netConnected(), replicaHosting(), life);
 

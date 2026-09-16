@@ -64,6 +64,12 @@
 #define LIFE_SCALE_SIGHT 30.0f            //   sight = LC4 L + R
 #define LIFE_SCALE_STEER 15.0f            //   steering = |DNa02 L - R|
 #define LIFE_SCALE_TASTE 30.0f            //   taste = GRN
+// pokes: FlyCore's Stimulated events by anyone but this body, read with eth_getLogs at every poll while hosting
+// (the screen's ice bolt and "0x8a.. poked me: shock!"; needs an RPC that serves eth_getLogs, like the feeder's name)
+#define POKE_LOOKBACK_BLOCKS 2000         // never scan further back than this after a gap (Wi-Fi down); older pokes are skipped
+#define POKE_OVERLAP_BLOCKS 8             // consecutive scans overlap by this many blocks (load-balanced RPC nodes lag each other)
+#define POKE_FAIL_BACKOFF 3               // eth_getLogs failing this often in a row (an RPC that refuses it): retry only every
+#define POKE_RETRY_S 300                  //   this many seconds
 
 // senses (HARDWARE.md §4.2/§4.3)
 #define HALL_L_PIN 8                      // Port B, hall left  -> CH_CUE wedge HALL_L_WEDGE
