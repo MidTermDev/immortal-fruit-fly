@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CFG } from "@/lib/config";
-import { Chain, LogScan } from "@/lib/chain";
-import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName, bodyNote, hostOrigin, colonyOrigin, isCoreOnlyBody, isColonyBody, scanLabel } from "@/lib/registry";
+import { Chain, LogScan, LifeInfo } from "@/lib/chain";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, dur, ipfs, pad, status, bodyName, bodyNote, hostOrigin, colonyOrigin, isCoreOnlyBody, isColonyBody, scanLabel, mergeEvents, inBody } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
 import Core from "@/components/Core";
+import KeepAlive from "@/components/KeepAlive";
 import LifeStream, { probeHost, HostHealth } from "@/components/LifeStream";
 import { ColonyFigure } from "@/components/Colony";
 import { probeColonyFly } from "@/lib/colony";
@@ -34,6 +35,7 @@ export default function Specimen() {
   const [info, setInfo] = useState<RegistryInfo | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [scan, setScan] = useState<LogScan | null>(null);
+  const [life, setLife] = useState<LifeInfo | null>(null);   // its standing with the LifeFund, as KeepAlive reads it
   const [children, setChildren] = useState<{ id: number; name: string }[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [, setLiveUrl] = useState("");
@@ -67,10 +69,11 @@ export default function Specimen() {
     const rec = await ch.flyRecord(id); if (stale()) return; setF(rec);
     const probing = Promise.all([probe(ch, rec), probeColony(rec)]);   // alongside the event scans, which can take seconds on the public RPCs
     if (rec.uri && rec.uri.startsWith("ipfs://")) ch.metadataOf(rec.uri).then((m) => m && !stale() && setMeta(m));
-    // one scan of the registry serves both lists (the second call reads from the first one's cache)
-    const [{ events: mine, scan: sc }, { events: all }] = await Promise.all([ch.registryEvents(EVENTS_BLOCKS, id), ch.registryEvents(EVENTS_BLOCKS)]);
+    // one scan of the registry serves both lists (the second call reads from the first one's cache); the LifeFund's
+    // record of this fly (sponsored, kept, granted) is one small request and joins the registry's rows by block
+    const [{ events: mine, scan: sc }, { events: all }, { events: fund }] = await Promise.all([ch.registryEvents(EVENTS_BLOCKS, id), ch.registryEvents(EVENTS_BLOCKS), ch.lifeEvents(EVENTS_BLOCKS, id).catch(() => ({ events: [] as Ev[] }))]);
     if (stale()) return;
-    setEvents(mine); setScan(sc);
+    setEvents(mergeEvents(mine, fund)); setScan(sc);
     setChildren(all.filter((e) => e.name === "Minted" && (Number(e.args.parentA) === id || Number(e.args.parentB) === id)).map((e) => ({ id: Number(e.args.id), name: e.args.name })));
     const bodies = new Set<string>(); for (const e of mine) { if (e.args.body) bodies.add(String(e.args.body).toLowerCase()); }
     for (const b of [rec.body, rec.pendingBody]) if (b && b !== ZERO) bodies.add(b.toLowerCase());
@@ -106,6 +109,7 @@ export default function Specimen() {
   useEffect(() => {
     if (!id) return;
     shown.current = id; misses.current = 0;   // another fly on the same route: what was in flight for the last one is dropped
+    setLife(null);
     (async () => {
       try { const ch = await new Chain().connectRead(); chainRef.current = ch; setChain(ch); setInfo(await ch.registryInfo()); await refresh(ch); }
       catch (e: any) { setErr(e.reason === "ERC721NonexistentToken" || /nonexistent/i.test(e.message || "") ? `Fly #${id} has not been minted.` : "Could not read this fly: " + (e.shortMessage || e.message)); }
@@ -163,6 +167,8 @@ export default function Specimen() {
   const bn = f ? bodyNote(f, host.serves, names) : null;
   // the body's name for the life figure: the registry's, else what the host says it is (a development override can run a dormant fly)
   const lifeBody = (f && f.body !== ZERO ? bodyName(f.body, names) : host.health?.body ? bodyName(String(host.health.body), names) : "") || "—";
+  // where the keeper's food lands, for the "Keep it alive" column: the body's name, or nothing for a dormant fly
+  const where = f && f.alive ? inBody(f.body, names) : "";
   const commits = events.filter((e) => e.name === "Commit").length, jumps = events.filter((e) => e.name === "Interaction" && /jumped/.test(String(e.args.data))).length;
   return (
     <main>
@@ -190,6 +196,8 @@ export default function Specimen() {
               <div className="crow"><span>owner</span><span><a href={`${CFG.explorer}/address/${f?.owner}`} target="_blank" rel="noopener">{f ? short(f.owner) : "—"}</a>{isOwner ? " (you)" : ""}</span></div>
               <div className="crow"><span>body</span><span>{f && bn ? (f.body !== ZERO ? (bn.kind === "host" || bn.kind === "core" ? <>{bn.name} <Link href="/docs/pebbles/" className="dim" title={bn.title}>{bn.tag}</Link></> : bn.kind === "colony" ? <>{bn.name} <Link href="/colony/" className="dim" title={bn.title}>{bn.tag}</Link></> : bn.label) : f.pendingBody !== ZERO ? `→ ${bodyName(f.pendingBody, names)} (pending)` : "none") : "—"}</span></div>
               <div className="crow"><span>energy at last checkpoint</span><span>{f ? hms(f.energy) : "—"}</span></div>
+              <div className="crow"><span>sponsored life</span><span title="Seconds of life paid for in BNB and not yet fed; the keeper feeds it from this while it lives somewhere">{life ? (life.credit ? `${dur(life.credit)} left` : "none") : "—"}</span></div>
+              <div className="crow"><span>fed by the fund</span><span title="Everything the LifeFund has ever fed this fly, sponsored and free">{life ? (life.fedTotal ? dur(life.fedTotal) : "nothing yet") : "—"}</span></div>
               <div className="crow"><span>generation · deaths</span><span>{f ? `${f.generation} · ${f.deaths}` : "—"}</span></div>
               <div className="crow"><span>brain step</span><span>{f ? fmt(f.brainStep) : "—"}<small className="dim"> ({f ? (f.brainStep / 10000).toFixed(0) : "—"} s lived)</small></span></div>
               <div className="crow"><span>checkpoints · jumps</span><span>{events.length ? `${commits} · ${jumps}` : "—"}</span></div>
@@ -201,12 +209,12 @@ export default function Specimen() {
           </div>
 
           <div className="care-grid" style={{ marginTop: 44 }}>
-            <div className="care-col">
-              <div className="care-t"><h3>Feed</h3><span className="cost">{info ? `${fmtTok(info.feed)} $FLY = 1 s` : ""}</span></div>
-              <p>{f && f.body !== ZERO ? (bn?.kind === "core" ? `${bodyName(f.body, names)} hears it at its next poll and refills its energy bar.` : bn?.kind === "host" ? `The brain host drops it as food near the fly at its next poll, and ${bodyName(f.body, names)} chirps; the fly has to smell its way there.` : bn?.kind === "colony" ? "The Colony drops it as bread near the fly in the world at its next poll, 5 s a loaf; the fly has to smell its way there and eat." : `Food appears in ${bodyName(f.body, names)} at the next poll; the fly has to smell its way there.`) : "Banked as energy until a body runs it."} Anyone may feed any fly.</p>
-              <div className="field"><input type="number" min={1} value={secs} onChange={(e) => setSecs(e.target.value)} aria-label="Seconds of life" /><button className="btn fill" disabled={busy || !f || !f.alive} onClick={wallet ? feed : connect}>{busy ? "…" : wallet ? "Feed" : "Connect"}</button></div>
+            <KeepAlive key={id} id={id} alive={!!f && f.alive} where={where} chain={chain} wallet={wallet} connect={connect} toast={setToast} onSponsored={() => refresh(chainRef.current!)} onInfo={(li) => !stale() && setLife(li)}>
+              <div className="care-t"><h3 style={{ fontSize: 13.5 }}>Feed it $FLY</h3><span className="cost">{info ? `${fmtTok(info.feed)} $FLY = 1 s` : ""}</span></div>
+              <p>{f && f.body !== ZERO ? (bn?.kind === "core" ? `${bodyName(f.body, names)} hears it at its next poll and refills its energy bar.` : bn?.kind === "host" ? `The brain host drops it as food near the fly at its next poll, and ${bodyName(f.body, names)} chirps; the fly has to smell its way there.` : bn?.kind === "colony" ? "The Colony drops it as bread near the fly in the world at its next poll, 5 s a loaf; the fly has to smell its way there and eat." : `Food appears in ${bodyName(f.body, names)} at the next poll; the fly has to smell its way there.`) : "Banked as energy until a body runs it."} Anyone may feed any fly; this burns your own $FLY, one per second.</p>
+              <div className="field"><input type="number" min={1} value={secs} onChange={(e) => setSecs(e.target.value)} aria-label="Seconds of life" /><button className="btn" disabled={busy || !f || !f.alive} onClick={wallet ? feed : connect}>{busy ? "…" : wallet ? "Feed" : "Connect"}</button></div>
               <div className="lbl">= {Number(secs) ? hms(Number(secs)) : "—"} of life · {wallet ? `${short(wallet)} · ${bal}` : ""}</div>
-            </div>
+            </KeepAlive>
             <div className="care-col">
               {f && !f.alive ? (<>
                 <div className="care-t"><h3>Resurrect</h3><span className="cost">{info ? `${fmtTok(info.res)} $FLY + food` : ""}</span></div>

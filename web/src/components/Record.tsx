@@ -1,7 +1,10 @@
 "use client";
 import Link from "next/link";
 import { CFG } from "@/lib/config";
-import { Ev, fmt, fmtTok, short, bodyName, decodeKind } from "@/lib/registry";
+import { Ev, fmt, fmtTok, fmtBnb, short, dur, bodyName, decodeKind } from "@/lib/registry";
+
+/** The LifeFund's address, as the registry's Fed events name it when the keeper feeds a fly from the fund. */
+const isFund = (a: string) => !!CFG.lifeFund && String(a || "").toLowerCase() === CFG.lifeFund.toLowerCase();
 
 /** One line of a fly's on-chain record. Every row links to its transaction. */
 export function RecordRow({ e, names, showId }: { e: Ev; names?: Record<string, string>; showId?: boolean }) {
@@ -9,7 +12,11 @@ export function RecordRow({ e, names, showId }: { e: Ev; names?: Record<string, 
   const body = (x: string) => bodyName(x, names);
   switch (e.name) {
     case "Minted": act = "life"; who = short(a.to); txt = a.parentA && Number(a.parentA) ? <><b>born</b> as “{a.name}”, child of <Link href={`/fly/?id=${a.parentA}`}>#{String(a.parentA)}</Link> × <Link href={`/fly/?id=${a.parentB}`}>#{String(a.parentB)}</Link></> : <><b>minted</b> as “{a.name}” with a fresh genesis brain</>; break;
-    case "Fed": act = "feed"; who = short(a.by); txt = <>fed <b>{fmt(a.seconds_)} s of life</b> · {fmtTok(a.tokensBurned)} $FLY burned</>; break;
+    case "Fed": act = "feed"; who = isFund(a.by) ? "LifeFund" : short(a.by); txt = <>fed <b>{fmt(a.seconds_)} s of life</b> · {fmtTok(a.tokensBurned)} $FLY burned{isFund(a.by) ? " by the fund" : ""}</>; break;
+    // the LifeFund (contracts/src/LifeFund.sol): BNB credited as life, spent by the keeper, and the operator's free top-ups
+    case "Sponsored": act = "feed"; who = short(a.by); txt = <><b>sponsored {dur(a.seconds_)}</b> of life by {short(a.by)} for {fmtBnb(a.wei_)} BNB · {dur(a.credit)} sponsored life left</>; break;
+    case "Kept": act = "feed"; who = "LifeFund"; txt = <>fed <b>{dur(a.seconds_)}</b> from its sponsored life · {dur(a.creditLeft)} left</>; break;
+    case "Granted": act = "feed"; who = "operator"; txt = <>fed <b>{dur(a.seconds_)}</b> for free by the operator</>; break;
     case "Resurrected": act = "life"; who = short(a.by); txt = <><b>resurrected</b> as generation {String(a.generation)} with {fmt(a.energy)} s of life · {fmtTok(a.tokensBurned)} $FLY burned</>; break;
     case "Died": act = "life"; who = body(a.body); txt = <><b>died</b> in {body(a.body)}: {a.cause} · final brain <span className="mono">{String(a.stateRoot).slice(0, 14)}…</span></>; break;
     case "Commit": act = "brain"; who = body(a.body); txt = <>checkpoint at step {fmt(a.brainStep)} · brain <a className="mono" href={CFG.ipfsGateway + String(a.stateURI).replace("ipfs://", "")} target="_blank" rel="noopener">{String(a.stateRoot).slice(0, 14)}…</a> · {fmt(a.energy)} s left</>; break;

@@ -14,6 +14,14 @@ export const fmt = (n: number | bigint) => Number(n).toLocaleString("en-US");
 export const short = (a?: string | null) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "—");
 export const fmtTok = (wei: bigint, d = 0) => { try { return Number(ethers.formatEther(wei)).toLocaleString("en-US", { maximumFractionDigits: d }); } catch { return "0"; } };
 export const hms = (s: number) => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h} h ${m} min` : `${m} min ${s % 60} s`; };
+/** A duration without the zero parts: "24 h", "21 h 40 min", "2 h", "45 min", "30 s". For sums of life (sponsored, fed) rather than a clock. */
+export const dur = (s: number | bigint) => { let n = Math.max(0, Math.floor(Number(s))); const h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60); n %= 60; if (h >= 48) { const d = Math.floor(h / 24); return h % 24 ? `${fmt(d)} d ${h % 24} h` : `${fmt(d)} d`; } return h ? (m ? `${h} h ${m} min` : `${h} h`) : m ? (n ? `${m} min ${n} s` : `${m} min`) : `${n} s`; };
+/** "in the arena", "in the Colony", "in DOOM", "in Pebble 3": where a fly's food lands, as a phrase. */
+export const inBody = (addr: string, names: Record<string, string> = {}) => { if (!addr || addr === ZERO) return ""; const a = addr.toLowerCase(); return a === CFG.bodies.arena.toLowerCase() ? "in the arena" : a === CFG.bodies.colony.toLowerCase() ? "in the Colony" : `in ${bodyName(addr, names)}`; };
+/** BNB from wei, trimmed: "0.01", "0.0015", "1.2". */
+export const fmtBnb = (wei: bigint) => { try { return Number(ethers.formatEther(wei)).toLocaleString("en-US", { maximumFractionDigits: 6 }); } catch { return "0"; } };
+/** Two newest-first records (the registry's and the LifeFund's, say) as one, newest first; the first list's rows come first within a block. */
+export const mergeEvents = (...lists: Ev[][]) => ([] as Ev[]).concat(...lists).sort((x, y) => y.block - x.block);
 export const ipfs = (uri: string) => (uri && uri.startsWith("ipfs://") ? CFG.ipfsGateway + uri.slice(7) : uri);
 export const pad = (id: number) => String(id).padStart(3, "0");
 

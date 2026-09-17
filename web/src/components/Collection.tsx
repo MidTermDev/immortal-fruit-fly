@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CFG } from "@/lib/config";
 import { Chain, LogScan } from "@/lib/chain";
-import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName, isCoreOnlyBody, scanLabel } from "@/lib/registry";
+import { ethers } from "ethers";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, dur, ipfs, pad, status, bodyName, isCoreOnlyBody, scanLabel } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
 
 const PAGE = 24;
@@ -33,6 +34,7 @@ export default function Collection() {
   const [events, setEvents] = useState<Ev[]>([]);
   const [scan, setScan] = useState<LogScan | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [dayFor, setDayFor] = useState("24 h");   // what 0.01 BNB buys at the LifeFund's rate, from its own quote
   const looked = useRef(new Set<string>());
   const [wallet, setWallet] = useState<string | null>(null);
   const [bal, setBal] = useState("");
@@ -63,6 +65,7 @@ export default function Collection() {
       try {
         const ch = await new Chain().connectRead(); chainRef.current = ch;
         const ri = await ch.registryInfo(); setInfo(ri);
+        if (ch.hasLifeFund) ch.quoteLife(ethers.parseEther("0.01")).then((sec) => sec > 0 && setDayFor(dur(sec))).catch(() => {});
         await loadPage(ch, ri.total, 0);
         const { events: evs, scan: sc } = await ch.registryEvents(EVENTS_BLOCKS); setEvents(evs); setScan(sc);
         learnNames(ch, evs.map((e) => e.args.body).filter(Boolean)).catch(() => {});
@@ -95,13 +98,13 @@ export default function Collection() {
         <div className="wrap">
           <div className="sec-t">
             <div><div className="num">The collection · ERC-721 on BNB Smart Chain</div><h2>Immortal Fruit Flies</h2></div>
-            <p>Each token is a whole fruit-fly brain: the FlyWire connectome, 139,248 neurons, with its own state, memory, lineage and history anchored on-chain forever. Mint one for 1 $FLY and it wakes with an hour of life. Hand it to a body (the arena, DOOM) and it lives there; feed it or it starves; when it dies its brain is frozen at the last checkpoint and it cannot be sold until someone resurrects it. Two living flies can breed. At most 10,000 will ever exist.</p>
+            <p>Each token is a whole fruit-fly brain: the FlyWire connectome, 139,248 neurons, with its own state, memory, lineage and history anchored on-chain forever. Mint one for 1 $FLY and it wakes with an hour of life. Hand it to a body (the arena, the Colony, DOOM) and it lives there; keep it alive with a little BNB, or feed it $FLY, or it starves; when it dies its brain is frozen at the last checkpoint and it cannot be sold until someone resurrects it. Two living flies can breed. At most 10,000 will ever exist.</p>
           </div>
           {err && <div className="banner">{err}</div>}
           <div className="avail" style={{ marginBottom: 34 }}>
             <div><span className="lbl">minted</span><div className="big-n">{info ? `${fmt(info.total)} / ${fmt(info.max)}` : "—"}</div><div className="v">specimens · {info ? `${fmt(info.max - info.total)} left` : ""}</div></div>
             <div><span className="lbl">$FLY burned for life</span><div className="big-n">{info ? fmtTok(info.burned) : "—"}</div><div className="v">mints, feeding, resurrections, breeding</div></div>
-            <div><span className="lbl">prices</span><div className="v" style={{ marginTop: 8 }}>mint <b>{info ? fmtTok(info.mint) : "1"} $FLY</b> · feed <b>{info ? fmtTok(info.feed) : "1"} $FLY / s</b><br />resurrect <b>{info ? fmtTok(info.res) : "1,000"} $FLY</b> + food · breed <b>{info ? fmtTok(info.breed) : "5,000"} $FLY</b><br />royalty 2.5% on secondary sales</div></div>
+            <div><span className="lbl">prices</span><div className="v" style={{ marginTop: 8 }}>mint <b>{info ? fmtTok(info.mint) : "1"} $FLY</b> · keep alive <b>0.01 BNB ≈ {dayFor}</b> (or {info ? fmtTok(info.feed) : "1"} $FLY per second)<br />resurrect <b>{info ? fmtTok(info.res) : "1,000"} $FLY</b> + food · breed <b>{info ? fmtTok(info.breed) : "5,000"} $FLY</b><br />royalty 2.5% on secondary sales</div></div>
           </div>
           <div className="care-grid" style={{ marginBottom: 40 }}>
             <div className="care-col">
@@ -112,19 +115,20 @@ export default function Collection() {
             </div>
             <div className="care-col">
               <div className="care-t"><h3>Your flies</h3><span className="cost">{wallet ? `${mine.length} owned` : ""}</span></div>
-              {wallet ? (mine.length ? <div className="chips">{mine.map((i) => <Link key={i} href={`/fly/?id=${i}`} className="btn sm">#{pad(i)}</Link>)}</div> : <p>None yet. Mint one, or buy one on {CFG.market.name}.</p>) : <p>Connect a wallet to see the flies you own, then open one to feed it, hand it to a body, resurrect it or breed it.</p>}
+              {wallet ? (mine.length ? <div className="chips">{mine.map((i) => <Link key={i} href={`/fly/?id=${i}`} className="btn sm">#{pad(i)}</Link>)}</div> : <p>None yet. Mint one, or buy one on {CFG.market.name}.</p>) : <p>Connect a wallet to see the flies you own, then open one to keep it alive, hand it to a body, resurrect it or breed it.</p>}
               <a className="btn sm plain" href={CFG.market.collection} target="_blank" rel="noopener">Collection on {CFG.market.name} ↗</a>
             </div>
             <div className="care-col">
               <div className="care-t"><h3>The rules</h3><span className="cost">enforced by the contract</span></div>
               <ul className="rules">
+                <li>Anyone can keep any fly alive with a little BNB; the operator&apos;s keeper feeds it. Running in a body costs one second of life per second; flies that are not running do not age.</li>
                 <li>A dead fly cannot be transferred or sold. Resurrect it first.</li>
                 <li>Only the body running a fly may write its brain state; commits must move its brain forward.</li>
                 <li>Breeding needs two living flies you own, and burns {info ? fmtTok(info.breed) : "5,000"} $FLY.</li>
                 <li>The owner, or the body running it, may hand a fly to another body.</li>
                 <li>No admin keys over anyone&apos;s fly. Curator only sets portraits while a fly is dormant.</li>
               </ul>
-              <a className="btn sm plain" href={`${CFG.explorer}/address/${CFG.registry}#code`} target="_blank" rel="noopener">FlyRegistry, verified on BscScan →</a>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}><a className="btn sm plain" href={`${CFG.explorer}/address/${CFG.registry}#code`} target="_blank" rel="noopener">FlyRegistry, verified on BscScan →</a><a className="btn sm plain" href={`${CFG.explorer}/address/${CFG.lifeFund}#code`} target="_blank" rel="noopener">LifeFund →</a></div>
             </div>
           </div>
 

@@ -40,6 +40,11 @@ export const CFG = {
   core: "0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3",
   // Block FlyCore was deployed in (0 = unknown: event scans fall back to the registry's deploy block).
   coreDeployBlock: 122089807,
+  // LifeFund (contracts/src/LifeFund.sol): anyone pays a little BNB to keep a fly alive; the operator's keeper then feeds
+  // the fly from the fund's own $FLY whenever it is running in a body and hungry. Feeding still burns $FLY on the registry.
+  lifeFund: "0xB0e5Bf6c12207C7AFbB2A8f794809E3f072d93F3",
+  // Block LifeFund was deployed in (tx 0x5b42acd4…c7b3); event scans of the fund never look before it.
+  lifeFundDeployBlock: 122376071,
   bodies: { arena: "0x47005543c06246124480D196a275327325695BEd", doom: "0x642ebC7fD62a24406d8A86885F0131472E641c86", host: "0x4fC3E7D1fAD1A8E7FAC849DAa5BfF0C8333fe2a6", colony: "0x95187D9dBaF262aB3e1de52b71a20Ef171aEb3c5" },
   // The Colony (COLONY.md): a Minecraft world on the VPS where many flies live at once, each a whole brain. Its public
   // origin is fixed (DNS + nginx on the VPS), so the site prefers it to bodies(colony).uri; NEXT_PUBLIC_COLONY_URL

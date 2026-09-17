@@ -4,6 +4,12 @@ import { CFG } from "./config";
 import type { Ev } from "./registry";
 import REGISTRY_ABI from "@/data/registry.abi.json";
 import CORE_ABI from "@/data/core.abi.json";
+import LIFEFUND_ABI from "@/data/lifefund.abi.json";
+
+/** One fly's standing with the LifeFund (contracts/src/LifeFund.sol). Seconds are plain numbers; `secondsPerWei` is the
+ *  contract's rate times 1e18 (so seconds = wei × secondsPerWei / 1e18, exactly `quote`), and `sponsoredWei` the BNB
+ *  ever sent for the fly. `stockSeconds` is what the fund's own $FLY can still pay for, whatever fly. */
+export type LifeInfo = { credit: number; fedTotal: number; sponsoredWei: bigint; freeLeftToday: number; freeSecondsPerDay: number; secondsPerWei: bigint; stockSeconds: number };
 
 /** How far back an event scan actually reached. `complete` is false when no endpoint would serve the older blocks;
  *  `from` is then the oldest block that was read, so the UI can say "since block N" instead of pretending. */
@@ -63,6 +69,8 @@ export class Chain {
   provider: any = null; rpcUrl = ""; brain: any = null; token: any = null; world: any = null; worldW: any; registry: any = null; registryW: any; signer: any = null; account: string | null = null; brainW: any; tokenW: any; prices: any;
   /** FlyCore, only when CFG.core is set (feature-gated until it is deployed). */
   core: any = null; coreW: any; corePrices: { stimPrice: bigint; stimTTL: number; maxSteps: number } | null = null;
+  /** LifeFund, only when CFG.lifeFund is set: BNB in, seconds of life credited, fed by the operator's keeper. */
+  lifeFund: any = null; lifeFundW: any;
   _logEndpoints: LogEndpoint[] | null = null;
   _logCache = new Map<string, LogCache>();
   async connectRead() {
@@ -80,6 +88,7 @@ export class Chain {
     this.world = new ethers.Contract(CFG.world, WORLD_ABI, this.provider);
     this.registry = new ethers.Contract(CFG.registry, REGISTRY_ABI as any, this.provider);
     if (CFG.core) this.core = new ethers.Contract(CFG.core, CORE_ABI as any, this.provider);
+    if (CFG.lifeFund) this.lifeFund = new ethers.Contract(CFG.lifeFund, LIFEFUND_ABI as any, this.provider);
     const [tps, sp, rp, ttl, maxSteps] = await Promise.all([this.brain.TOKENS_PER_STEP(), this.brain.STIM_PRICE(), this.brain.RESURRECT_PRICE(), this.brain.STIM_TTL(), this.brain.MAX_STEPS()]);
     this.prices = { tokensPerStep: tps, stimPrice: sp, resurrectPrice: rp, stimTTL: Number(ttl), maxSteps: Number(maxSteps) };
     return this;
@@ -273,6 +282,35 @@ export class Chain {
     return (await this.coreW.tick(id, steps, { gasLimit: steps > 16 ? CORE_GAS.tick32 : CORE_GAS.tick16 })).wait();
   }
 
+  // ---- LifeFund: keep a fly alive for a little BNB (contracts/src/LifeFund.sol)
+  get hasLifeFund() { return !!this.lifeFund; }
+  /** One fly's standing with the fund: sponsored seconds not yet fed, what the fund has fed it, the free allowance left today, the rate and the fund's stock. */
+  async lifeInfo(id: number): Promise<LifeInfo> {
+    if (!this.lifeFund) throw new Error("LifeFund is not configured");
+    const lf = this.lifeFund;
+    const [credit, fedTotal, sponsoredWei, freeLeftToday, freeSecondsPerDay, secondsPerWei, stockSeconds] = await Promise.all([
+      lf.credit(id), lf.fedTotal(id), lf.sponsoredTotal(id), lf.freeLeftToday(id), lf.freeSecondsPerDay(), lf.secondsPerWeiE18(), lf.stockSeconds()]);
+    return { credit: Number(credit), fedTotal: Number(fedTotal), sponsoredWei, freeLeftToday: Number(freeLeftToday), freeSecondsPerDay: Number(freeSecondsPerDay), secondsPerWei, stockSeconds: Number(stockSeconds) };
+  }
+  /** Seconds of life `wei` buys at the fund's current rate (the contract's own `quote`). */
+  async quoteLife(wei: bigint): Promise<number> {
+    if (!this.lifeFund) throw new Error("LifeFund is not configured");
+    return Number(await this.lifeFund.quote(wei));
+  }
+  /** Pay `wei` of BNB to keep fly `id` alive. A plain payable call: no $FLY approval, the fund credits the seconds and the keeper spends them. */
+  async sponsorFly(id: number, wei: bigint) {
+    if (!this.lifeFundW) throw new Error(this.lifeFund ? "Connect a wallet first." : "LifeFund is not configured");
+    return (await this.lifeFundW.sponsor(id, { value: wei, gasLimit: 120000 })).wait();
+  }
+  /** Sponsored / Kept / Granted events of one fly on the fund, newest first, from the last `blocks` blocks but never
+   *  before the fund existed. Filtered on the node by the indexed id, so a fly's record is one small request. */
+  lifeEvents(id: number, blocks = 40000): Promise<EventScan> {
+    if (!this.lifeFund) return Promise.resolve({ events: [], scan: { from: 0, to: 0, complete: true, floor: 0 } });
+    const iface = this.lifeFund.interface;
+    const topics = [["Sponsored", "Kept", "Granted"].map((n) => iface.getEvent(n).topicHash), ethers.zeroPadValue(ethers.toBeHex(id), 32)];
+    return this._events(this.lifeFund, { address: CFG.lifeFund, topics }, blocks, CFG.lifeFundDeployBlock || CFG.registryDeployBlock);
+  }
+
   /** FlyBrain v2's events, newest first, from the last `blocks` blocks. */
   recentEvents(blocks = 20000): Promise<EventScan> { return this._events(this.brain, { address: CFG.brain }, blocks); }
   async connectWallet() {
@@ -289,6 +327,7 @@ export class Chain {
     this.signer = await bp.getSigner(); this.account = await this.signer.getAddress();
     this.brainW = this.brain.connect(this.signer); this.tokenW = this.token.connect(this.signer); this.worldW = this.world.connect(this.signer); this.registryW = this.registry.connect(this.signer);
     if (this.core) this.coreW = this.core.connect(this.signer);
+    if (this.lifeFund) this.lifeFundW = this.lifeFund.connect(this.signer);
     return this.account;
   }
   async balance() { return this.account ? this.token.balanceOf(this.account) : 0n; }

@@ -8,12 +8,13 @@ export default function Page() {
     <DocsShell current="/docs/play/">
       <h1>How to play</h1>
       <p className="lede">Own a fly, keep it alive, move it between bodies, bring it back when it dies. Then, separately, poke the on-chain core. Every action is a transaction on BNB Smart Chain.</p>
-      <div className="callout"><b>You need:</b> a wallet on BNB Smart Chain (MetaMask, Rabby, Binance Wallet), a little BNB for gas, and <code>$FLY</code> for anything that creates or sustains life. <a href={CFG.links.pancake + CFG.token}>Get $FLY on PancakeSwap</a>.</div>
+      <div className="callout"><b>You need:</b> a wallet on BNB Smart Chain (MetaMask, Rabby, Binance Wallet) and a little BNB. Keeping a fly alive costs only BNB; minting, resurrecting, breeding and feeding it yourself burn <code>$FLY</code>. <a href={CFG.links.pancake + CFG.token}>Get $FLY on PancakeSwap</a>.</div>
       <h2>Your fly</h2>
       <table className="data"><thead><tr><th>Action</th><th>What happens</th><th>Cost</th></tr></thead><tbody>
         <tr><td><a href="/flies/">Mint</a></td><td>A new fly with a fresh whole brain (139,248 neurons in the canonical resting state), an hour of life banked, and a portrait. It is yours: an ERC-721 you can hold or sell on <a href={CFG.market.collection}>Element</a>, the NFT marketplace for BNB Chain.</td><td>1 FLY, burned</td></tr>
         <tr><td>Assign to a body</td><td>Hand it to the Arena (it streams live on the home page and forages for food) or to DOOM. The body downloads its last committed brain, checks the hash, and runs it. Only you, or the body running it, can do this.</td><td>gas</td></tr>
-        <tr><td>Feed</td><td>Seconds of life. In the arena that is food dropped near the fly; it has to smell its way there. Dormant flies bank it. Anyone may feed any fly.</td><td>1 FLY per second, burned</td></tr>
+        <tr><td>Keep alive</td><td>Send a little BNB to the <a href={`${CFG.explorer}/address/${CFG.lifeFund}#code`}>LifeFund</a> for any fly, yours or not. The fly is credited with seconds of life at the fund&apos;s rate, and the operator&apos;s keeper feeds it from the fund&apos;s own $FLY whenever it is running in a body and getting hungry; the credit never expires, and a fly that is not running does not age. The operator also grants every fly up to two hours of free life a day. The metabolism is unchanged: the keeper&apos;s feed burns $FLY on the registry like any other.</td><td>0.01 BNB ≈ 24 h</td></tr>
+        <tr><td>Feed</td><td>Seconds of life, paid in your own $FLY. In the arena that is food dropped near the fly; it has to smell its way there. Dormant flies bank it. Anyone may feed any fly.</td><td>1 FLY per second, burned</td></tr>
         <tr><td>Resurrect</td><td>Only when dead. The same brain continues from exactly the state it died in, generation + 1. Until then the token cannot be transferred or sold.</td><td>1,000 FLY + food, burned</td></tr>
         <tr><td>Breed</td><td>Two living flies you own produce a child, generation 0, with both parents in its lineage.</td><td>5,000 FLY, burned</td></tr>
       </tbody></table>

@@ -65,6 +65,8 @@ Siyuan's reply to that (quoted by CZ: *"immortal fruit flies on BNB Chain"*) nam
 | Metadata | per-fly JSON + portrait on IPFS, refreshed by the body at every commit (status, energy, brain step, body, lineage); collection `contractURI` on IPFS |
 | Marketplace | Element (the NFT marketplace that indexes BNB Chain; OpenSea does not list BSC): https://element.market/collections/immortal-fruit-flies-1 · fly #1: https://element.market/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813/1 |
 
+Keeping a fly alive costs a little BNB. Feeding is the metabolism and stays as it is (1 $FLY burned per second of life), but nobody should have to hold $FLY for that, so `LifeFund` ([`0xB0e5Bf6c12207C7AFbB2A8f794809E3f072d93F3`](https://bscscan.com/address/0xB0e5Bf6c12207C7AFbB2A8f794809E3f072d93F3#code), verified; `contracts/src/LifeFund.sol`) takes BNB instead: anyone calls `sponsor(id)` with BNB for any fly, the fly is credited with seconds of life at the published rate (0.01 BNB ≈ 24 h), and the operator's keeper (`brain/lifekeeper.py`) spends that credit by feeding the fly from the fund's own $FLY whenever it is running in a body and getting hungry. The keeper also grants every fly up to two hours of free life a day. A fly that is not running does not age, so the credit waits; the BNB goes to the treasury, the operator refills the fund's $FLY, and the contract can do nothing to a fly but feed it. Every fly's page has a "Keep it alive" column, and the sponsorships, keeps and grants are in its record.
+
 ## Live on BNB Smart Chain
 
 | | Address |

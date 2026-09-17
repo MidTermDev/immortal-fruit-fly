@@ -206,7 +206,7 @@ function Explainer() {
       </div>
       <div className="care-col">
         <div className="care-t"><h3>What it costs</h3><span className="cost">1 s of life per second</span></div>
-        <p>Being in the Colony costs one second of life per second, from the fly&apos;s on-chain energy, committed at every checkpoint. Feeding it (1 $FLY per second) drops bread near it, 5 s a loaf; it has to smell its way there. A zombie hit costs 60 s; the bot never fights back. At zero energy the fly dies on-chain, <i>starved in the Colony</i>, its brain preserved: resurrect it and assign it again. The Colony holds a fixed number of flies at once; the rest wait in a queue, and the speed of every brain is shown honestly.</p>
+        <p>Being in the Colony costs one second of life per second, from the fly&apos;s on-chain energy, committed at every checkpoint; flies that are not running do not age. Anyone can keep any fly alive with a little BNB (0.01 BNB is about a day); the operator&apos;s keeper feeds it, or you feed it $FLY yourself (1 per second). Either way bread drops near it, 5 s a loaf, and it has to smell its way there. A zombie hit costs 60 s; the bot never fights back. At zero energy the fly dies on-chain, <i>starved in the Colony</i>, its brain preserved: resurrect it and assign it again. The Colony holds a fixed number of flies at once; the rest wait in a queue, and the speed of every brain is shown honestly.</p>
       </div>
     </div>
   );
