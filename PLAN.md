@@ -112,9 +112,9 @@ Every fly gets an on-chain reflex: `FlyBrain` (the 155-neuron compass) becomes p
 
 The Shiu model has no plasticity, so today "memory" is the compass core's engram. The real memory is the mushroom body: Kenyon cell → MBON synapses depressed by dopamine (Aso 2014, Hige 2015). We add that to the simulator (a few thousand plastic weights, dopamine neurons driven by reward = eating, punishment = being caught), commit the weights as `memoryRoot`, and define `breed` as a published crossover of two memory vectors. Then a fly's lineage carries what its ancestors learned. That is the "evolving on-chain species" line, made concrete.
 
-### 3.7 Economics ($FLY)
+### 3.7 Economics ($FLY, and BNB for everyone else)
 
-Everything that creates or sustains life burns $FLY: mint 1, feed, resurrect, breed. Bodies pay their own gas to commit (we run the first bodies; a body could charge its flies' owners later, out of scope). No faucets, no owner keys.
+Everything that creates or sustains life burns $FLY: mint 1, feed, resurrect, breed. Bodies pay their own gas to commit (we run the first bodies). **[Added 17 September 2026: `LifeFund` at `0xB0e5Bf6c12207C7AFbB2A8f794809E3f072d93F3`. Holding $FLY to feed a fly was too much to ask of most people, so anyone can pay a little BNB for a fly (0.01 BNB ≈ 24 h) and the operator's keeper feeds it from the fund's own $FLY whenever it is running somewhere and gets hungry; every fly running in a body also gets 2 free hours a day from the operator. The metabolism still burns $FLY on-chain; the BNB pays for it.]**
 
 ## 4. Build order
 
