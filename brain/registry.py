@@ -3,7 +3,7 @@
 Used by every body (arena, DOOM, …) and by the curator. All sends from one machine go
 through a file lock so bodies sharing a host never race for nonces.
 """
-import os, json, time, fcntl, hashlib, subprocess, math, warnings
+import os, time, json, fcntl, hashlib, subprocess, math, warnings
 warnings.filterwarnings('ignore', message='.*MismatchedABI.*')
 from web3 import Web3
 
@@ -98,8 +98,21 @@ class Registry:
         if not self.acct: raise RuntimeError('no key')
         with open(SENDLOCK, 'w') as lf:
             fcntl.flock(lf, fcntl.LOCK_EX)
-            tx = fn(*args).build_transaction({'from': self.address, 'nonce': self.w3.eth.get_transaction_count(self.address, 'pending'), 'gas': gas or 600_000, 'gasPrice': max(self.w3.eth.gas_price, 50_000_000), 'value': value, 'chainId': 56})
-            signed = self.acct.sign_transaction(tx); h = self.w3.eth.send_raw_transaction(signed.raw_transaction)
+            for attempt in range(5):
+                # a delegated (EIP-7702) account may have one transaction in flight: wait until nothing is pending, so the
+                # nonce we read is the one the node will accept (the 'pending' count can lag a transaction it just saw)
+                for _ in range(60):
+                    latest = self.w3.eth.get_transaction_count(self.address); pending = self.w3.eth.get_transaction_count(self.address, 'pending')
+                    if pending <= latest: break
+                    time.sleep(1)
+                tx = fn(*args).build_transaction({'from': self.address, 'nonce': max(latest, pending), 'gas': gas or 600_000, 'gasPrice': max(self.w3.eth.gas_price, 50_000_000), 'value': value, 'chainId': 56})
+                signed = self.acct.sign_transaction(tx)
+                try:
+                    h = self.w3.eth.send_raw_transaction(signed.raw_transaction); break
+                except Exception as e:
+                    msg = str(e)
+                    if attempt < 4 and ('nonce' in msg or 'in-flight' in msg or 'already known' in msg): time.sleep(2 + 2 * attempt); continue
+                    raise
             rc = self.w3.eth.wait_for_transaction_receipt(h, timeout=180)
         if rc['status'] != 1: raise RuntimeError('reverted ' + h.hex())
         return rc
