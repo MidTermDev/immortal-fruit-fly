@@ -26,8 +26,8 @@ type ColonyAnswer = { id: number; origin: string; serves: boolean | null };
 type Host = { id: number; origin: string; serves: boolean | null; health: HostHealth | null };
 const notAsked = (id: number): Host => ({ id, origin: "", serves: null, health: null });
 
-export default function Specimen() {
-  const sp = useSearchParams(); const id = Math.max(0, parseInt(sp.get("id") || "1", 10) || 0);
+export default function Specimen({ idProp }: { idProp?: number } = {}) {
+  const sp = useSearchParams(); const id = idProp || Math.max(0, parseInt(sp.get("id") || "1", 10) || 0);
   const chainRef = useRef<Chain | null>(null);
   const [chain, setChain] = useState<Chain | null>(null);   // the same object, as state, for children that render from it
   const [f, setF] = useState<FlyRecord | null>(null);
@@ -189,6 +189,7 @@ export default function Specimen() {
                 {inColony && <a className="btn sm" href="#colony">Watch it in the Colony</a>}
                 {f && f.stateURI && <a className="btn sm plain" href={ipfs(f.stateURI)} target="_blank" rel="noopener">Brain snapshot (IPFS) ↗</a>}
                 <a className="btn sm plain" href={`${CFG.explorer}/token/${CFG.registry}?a=${id}`} target="_blank" rel="noopener">BscScan →</a>
+                <a className="btn sm plain" href={`https://x.com/intent/post?text=${encodeURIComponent(`${f ? f.name || `Fly #${id}` : `Fly #${id}`}, a whole fruit-fly brain living on BNB Chain${f && !f.alive ? " (dead, brain preserved; someone bring it back)" : ""}. ${CFG.site}/f/${id}`)}`} target="_blank" rel="noopener" title="The link unfurls into this fly's own card">Share on X ↗</a>
               </div>
             </div>
             <aside className="chart" style={{ paddingBottom: 0 }}>

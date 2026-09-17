@@ -375,3 +375,28 @@ input.text:focus, .field select:focus { border-color: var(--ink); outline: none;
 .chk-rows a:hover { color: var(--amber-fig); }
 .neuro .cell-cap a:hover { color: var(--red); }
 @media (max-width: 1040px) { .neuro-grid { grid-template-columns: 1fr; } .picker { max-height: 360px; } }
+
+/* ── the collection: hall of the species, browse bar ─────────── */
+.boards > div { gap: 6px; }
+.boards h3 { font-size: 15px; }
+.boards p { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.02em; color: var(--ink-3); line-height: 1.45; min-height: 30px; }
+ol.board { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; }
+ol.board li { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--rule-2); font-size: 13px; }
+ol.board li:last-child { border-bottom: 0; }
+ol.board .rank { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+ol.board .val { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; }
+ol.board a:hover, ol.board .linkish:hover { color: var(--red); }
+ol.board .linkish { padding: 0; text-align: left; }
+ol.board li a, ol.board li .linkish { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browse-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.browse-bar input.text { flex: 1 1 220px; min-width: 160px; padding: 8px 11px; border: 1px solid var(--ink); background: var(--well); font: inherit; font-size: 13.5px; }
+.browse-bar select { padding: 8px 10px; border: 1px solid var(--ink); background: var(--well); font: inherit; font-size: 13px; }
+.browse-bar .chips { gap: 4px; }
+.flies-grid.mine { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+.rules.cols2 { columns: 2; column-gap: 40px; }
+.rules.cols2 li { break-inside: avoid; }
+@media (max-width: 900px) { .rules.cols2 { columns: 1; } .care-col[style*="span 2"] { grid-column: auto !important; } }
+.avail.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 900px) { .avail.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .avail.four { grid-template-columns: 1fr; } }
+ol.board li.dim { display: block; font-family: var(--mono); font-size: 11.5px; }

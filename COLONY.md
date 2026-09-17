@@ -70,6 +70,7 @@ Python → Node, 10 Hz:
 - `/colony` on the site: the world through a browser viewer (prismarine-viewer, embedded), a colony map (top-down: flies, food, torches, mobs; from `/colony/state`), and a fly picker. For the picked fly: the 3D brain point cloud lighting up (the home page's `BrainLive`, fed by `/fly/<id>/ws`), the region bars, the diary and its speech, the on-chain block of its last checkpoint. That is the "neurology" panel: the real neurons of the fly you are watching, firing as it walks.
 - Each fly's page gets a **Colony** figure when its body is the Colony: the viewer and the same panel.
 - Nothing on the page is a video: it is the live world and the live brain.
+- The **registry index** (`brain/index.py`, `run_index.sh`, :8127, nginx at `https://mc.immortalfly.app/registry/`) reads every fly's record, owner and name from FlyRegistry v3 once a minute (Multicall3, public RPCs) and serves `flies.json`, `leaders.json`, `owner/<addr>`, `fly/<id>.json` and 320 px portrait thumbnails with CORS. The site's `/flies` reads it for "Your flies" (a browser cannot do 3,000 `ownerOf` calls), the browse grid with its search, filters and sorts, and the hall of the species (elders, longest lived, most lives, best fed, bloodlines, keepers, where they are). `/f/<id>` and `/api/og/<id>` (Vercel) turn a fly's link into its own card on X. The index is a read model: a fly's page still reads the chain, and every answer carries the block it was read at.
 
 ## 6. Build order
 
