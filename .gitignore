@@ -53,3 +53,5 @@ firmware/include/secrets.h
 firmware/.pio/
 brain/state_*/
 brain/host_url.txt
+brain/doom_host.out
+brain/doom_sessions/
