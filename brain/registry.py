@@ -77,6 +77,25 @@ class Registry:
             out += [self._fly_dict(i, r) for i, r in zip(chunk, rows)]
         return out
 
+    INDEX_URL = os.environ.get('INDEX_URL', 'http://127.0.0.1:8127/registry/flies.json')
+    INDEX_MAX_AGE = 240   # seconds; older than this the index is stale (it reads the chain once a minute) and the chain is scanned instead
+
+    def all_flies(self, max_age=None):
+        """Every fly's record, from the registry index (index.py: one local request, read from the chain within the last minute)
+        when it is up and fresh, else `flies(1..total)` from the chain. Records carry the chain's keys (body/pendingBody as
+        checksummed addresses, ZERO for none), plus name and owner when they come from the index. Returns (total, [records])."""
+        import urllib.request
+        try:
+            with urllib.request.urlopen(self.INDEX_URL, timeout=10) as r: d = json.loads(r.read())
+            if time.time() - float(d.get('at', 0)) > (max_age or self.INDEX_MAX_AGE): raise RuntimeError('stale')
+            zero = '0x' + '0' * 40
+            rows = [{'id': f['id'], 'name': f['name'], 'owner': Web3.to_checksum_address(f['owner']), 'generation': f['gen'], 'deaths': f['deaths'], 'parentA': f['pa'], 'parentB': f['pb'],
+                     'brainStep': f['step'], 'energy': f['energy'], 'bornBlock': f['born'], 'lastCommitBlock': f['commit'], 'stateRoot': f['state'][2:],
+                     'body': Web3.to_checksum_address(f['body']) if f['body'] else zero, 'pendingBody': Web3.to_checksum_address(f['pending']) if f['pending'] else zero, 'alive': bool(f['alive'])} for f in d['flies']]
+            return int(d['total']), rows
+        except Exception:
+            n = self.total(); return n, self.flies(range(1, n + 1))
+
     def body(self, addr):
         """The registered body record: {name, uri, registeredBlock, flies} ('' name when never registered)."""
         b = self.c.functions.bodies(Web3.to_checksum_address(addr)).call(); return {'name': b[0], 'uri': b[1], 'registeredBlock': b[2], 'flies': b[3]}

@@ -91,7 +91,7 @@ def select_wanted(recs, name_of, arena=ARENA_ADDR, skip=ARENA_SKIP, cap=ARENA_MA
 
 def scan_registry():
     """Every fly's record, and which of them this host runs: {id: (body, name, class)}."""
-    n = reg.total(); recs = {f['id']: f for f in reg.flies(range(1, n + 1))}; extra = None
+    n, rows = reg.all_flies(); recs = {f['id']: f for f in rows}; extra = None   # the registry index when it is fresh, else the chain
     if TEST_FLIES:
         try: extra = json.load(open(TEST_FLIES))
         except Exception: extra = {}

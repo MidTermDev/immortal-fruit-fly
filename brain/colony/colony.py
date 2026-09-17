@@ -39,6 +39,8 @@ ONLY_IDS = {int(x) for x in os.environ.get('COLONY_ONLY_IDS', '').split(',') if 
 DEAD_GRACE = float(os.environ.get('DEAD_GRACE', '120'))    # a dead fly's brain (and its bot) stay this long after the chain agrees it is dead
 STOP_WAIT = 40.0            # seconds a brain gets to save its state on SIGTERM
 ACCEPT_RETRY = 90.0         # seconds between accept attempts for one fly
+TURN_S = float(os.environ.get('COLONY_TURN_S', '3600'))     # with others waiting, a fly's slot lasts this long; then it is checkpointed, released (dormant, alive) and the next fly gets in. 0 = no turns
+TURN_RETRY = 120.0          # seconds before a failed turn-over is tried again
 KEY = os.path.join(BRAIN, 'body_colony.key'); ADDR_FILE = os.path.join(BRAIN, 'body_colony.address'); ZERO = '0x0000000000000000000000000000000000000000'
 ADDR = open(ADDR_FILE).read().strip() if os.path.exists(ADDR_FILE) else ''
 SERVER_DIR = os.path.join(HERE, 'server'); TOOLS = os.path.join(HERE, 'tools')
@@ -55,6 +57,7 @@ reg = Registry(key_path=KEY if (os.path.exists(KEY) and (ANNOUNCE or SEND)) else
 children = {}               # fly id -> child record
 names = {}                  # fly id -> name
 scan = {'at': 0.0, 'total': 0, 'error': '', 'queue': [], 'accept': [], 'host': []}
+turns = {'done': 0}   # slots handed over because others were waiting
 accepting = {}              # fly id -> last accept attempt (wall)
 world = {'time': None, 'night': None, 'mobs': None, 'players': [], 'server': False, 'at': 0.0}
 paper = {'proc': None, 'started': 0.0, 'missing': False, 'fails': 0, 'next': 0.0, 'owned': False, 'up': False}
@@ -150,7 +153,7 @@ def select_flies(recs, addr, max_flies, running=()):
 
 
 def scan_registry():
-    n = reg.total(); recs = {f['id']: f for f in reg.flies(range(1, n + 1))}
+    n, rows = reg.all_flies(); recs = {f['id']: f for f in rows}   # the registry index when it is fresh, else the chain
     if ONLY_IDS: recs = {k: v for k, v in recs.items() if k in ONLY_IDS}
     return n, recs
 
@@ -186,6 +189,28 @@ def accept_fly(fid):
         rc = reg.accept(fid); log(f"accepted fly #{fid} ({fly_name(fid)}) tx {rc['transactionHash'].hex()}"); return True
     except Exception as e:
         log(f'fly #{fid}: accept failed:', repr(e)[:160]); return False
+
+
+def release_fly(fid):
+    """release(id) with the Colony key: the fly is handed back to its owner, dormant but alive, and can be assigned again."""
+    if not SEND: log(f'fly #{fid}: not releasing (COLONY_SEND=0)'); return False
+    if not reg.address: log(f'fly #{fid}: cannot release without the key'); return False
+    try:
+        rc = reg.release(fid); log(f"released fly #{fid} ({fly_name(fid)}) tx {rc['transactionHash'].hex()}"); return True
+    except Exception as e:
+        log(f'fly #{fid}: release failed:', repr(e)[:160]); return False
+
+
+async def turn_over(session, c):
+    """A fly whose turn is over while others wait: a checkpoint now (so the record carries its last minutes and its energy), then release, then stop."""
+    fid = c['id']
+    try:
+        async with session.post(f"http://127.0.0.1:{c['port']}/admin/commit", timeout=ClientTimeout(total=90)) as r: ok = r.status == 200
+    except Exception as e: ok = False; log(f'fly #{fid}: checkpoint before release failed: {repr(e)[:120]}')
+    if not ok: c['turn_next'] = time.time() + TURN_RETRY; return
+    if not await asyncio.to_thread(release_fly, fid): c['turn_next'] = time.time() + TURN_RETRY; return
+    turns['done'] += 1
+    await stop_child(c, f'its turn ({TURN_S / 60:.0f} min) is over and others are waiting: released, dormant and alive')
 
 
 # ------------------------------------------------------------------ processes: the Paper server, the brains, the bots, the viewers
@@ -409,6 +434,11 @@ async def supervise(app):
                 c['dead_since'] = c['dead_since'] or time.time()
                 if time.time() - c['dead_since'] > DEAD_GRACE: await stop_child(c, f'dead for {DEAD_GRACE:.0f} s')
             await asyncio.gather(*(child_health(session, c) for c in children.values()))
+            if TURN_S > 0 and sel['queue'] and len(children) >= MAX_FLIES:
+                # one hand-over per scan, the longest-running fly first; only a living, hosted fly, and never one that just came in
+                due = sorted((c for c in children.values() if c['health'].get('ok') and c['health'].get('hosting') and c['health'].get('alive') is not False
+                              and time.time() - c['started'] > TURN_S and time.time() >= c.get('turn_next', 0.0)), key=lambda c: c['started'])
+                if due: await turn_over(session, due[0])
             await read_world()
             await whitelist_allowed()   # the camera and ALLOW_PLAYERS: retried every scan until each name is in (RCON answers well after start_paper returns)
             if camera_due() and time.time() >= camera['next']:
@@ -514,8 +544,9 @@ async def colony_state(request):
                       'pos': fr.get('pos'), 'yaw': fr.get('yaw'), 'mode': fr.get('mode'), 'energy': fr.get('energy'), 'age_s': (fr.get('t_ms') or 0) / 1000, 'generation': fr.get('generation'),
                       'last_event': ev[-1][1] if ev else None, 'events': ev[-5:], 'torches': fr.get('torches') or [], 'food': fr.get('foodItems') or [], 'mobs': fr.get('mobs') or [], 'flies_near': fr.get('flies') or [],
                       'motor': fr.get('motor'), 'agent': fr.get('agent'), 'night': fr.get('night'), 'light': fr.get('light'), 'ate': fr.get('ate'), 'jumps': fr.get('jumps'), 'hits': fr.get('hits'), 'chain': fr.get('chain'),
-                      'port': c['port'], 'viewer': f'/fly/{c["id"]}/view/', 'ws': f'/fly/{c["id"]}/ws', 'since': c['started'], 'restarts': c['restarts'], 'dead_since': c['dead_since'], 'threads': c['threads'], 'health_ok': c['health'].get('ok')})
-    data = {'colony': ADDR, 'url': PUBLIC_URL, 'max_flies': MAX_FLIES, 'flies': flies, 'queue': [{'id': i, 'name': name_of(i), 'why': why} for i, why in scan['queue']] + [{'id': i, 'name': name_of(i), 'why': 'assigned to the Colony; accepting'} for i in scan['accept'] if i not in children],
+                      'port': c['port'], 'viewer': f'/fly/{c["id"]}/view/', 'ws': f'/fly/{c["id"]}/ws', 'since': c['started'], 'restarts': c['restarts'], 'dead_since': c['dead_since'], 'threads': c['threads'], 'health_ok': c['health'].get('ok'),
+                      'turn_left': (max(0.0, TURN_S - (time.time() - c['started'])) if TURN_S > 0 and scan['queue'] else None)})
+    data = {'colony': ADDR, 'url': PUBLIC_URL, 'max_flies': MAX_FLIES, 'turn_s': TURN_S, 'turns': turns['done'], 'flies': flies, 'queue': [{'id': i, 'name': name_of(i), 'why': why} for i, why in scan['queue']] + [{'id': i, 'name': name_of(i), 'why': 'assigned to the Colony; accepting'} for i in scan['accept'] if i not in children],
             'world': {**world, 'paper': paper['up'], 'paper_owned': paper['owned'], 'camera': camera['proc'] is not None and camera['proc'].poll() is None, 'camera_whitelisted': CAMERA_NAME in allow['done'], 'viewer': '/view/'}, 'scan': {k: v for k, v in scan.items() if k in ('at', 'total', 'error')}, 'now': time.time()}
     state_cache.update(at=time.time(), data=data)
     return web.json_response(data, headers=CORS)

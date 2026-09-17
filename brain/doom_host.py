@@ -164,8 +164,8 @@ def update_assigned(head):
 
 
 def scan():
-    head = reg.w3.eth.block_number; n = reg.total()
-    recs = {f['id']: f for f in reg.flies(range(1, n + 1))}
+    head = reg.w3.eth.block_number; n, rows = reg.all_flies()   # the registry index when it is fresh, else the chain
+    recs = {f['id']: f for f in rows}
     update_assigned(head)
     return n, recs, select_queue(recs, assigned, DOOM_ADDR, {**blocked, **{fid: 10 ** 12 for fid in unfinished}})
 

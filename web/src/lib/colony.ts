@@ -25,11 +25,15 @@ export type ColonyFly = {
   dx: number; dz: number;
   mode: string; energy: number; alive: boolean; realtime: number | null; health: number | null;
   lastEvent: { t_ms: number; text: string } | null; say: string; since: number | null;
+  /** seconds left of this fly's turn while others wait (null: no turn running, it stays as long as it lives) */
+  turnLeft: number | null;
 };
 export type ColonyPoint = { x: number; y: number; z: number; kind: string; points?: number };
 export type ColonyState = {
   ok: boolean; wall: number | null; max: number | null; night: boolean | null; time: number | null; players: number | null;
   spawn: [number, number, number] | null; flies: ColonyFly[]; queue: { id: number; name: string }[]; queued: number;
+  /** with others waiting, a fly's slot lasts this many seconds; then it is checkpointed and handed back (0/null: no turns) */
+  turnS: number | null; turns: number;
   food: ColonyPoint[]; torches: ColonyPoint[]; mobs: ColonyPoint[];
 };
 
@@ -75,7 +79,7 @@ export function parseColonyState(j: any): ColonyState {
     flies.push({
       id, name: String(f.name || `fly #${id}`), x: pos[0], y: pos[1], z: pos[2], dx, dz,
       mode: String(f.mode || (f.alive === false ? "dead" : "walk")), energy, alive: f.alive === undefined ? energy > 0 : !!f.alive,
-      realtime: num(f.realtime), health: num(f.health), lastEvent: readEvent(f.last_event ?? f.lastEvent ?? f.event), say: String(f.say ?? f.speech ?? f.chat ?? ""), since: num(f.since),
+      realtime: num(f.realtime), health: num(f.health), lastEvent: readEvent(f.last_event ?? f.lastEvent ?? f.event), say: String(f.say ?? f.speech ?? f.chat ?? ""), since: num(f.since), turnLeft: num(f.turn_left),
     });
   }
   const qRaw = src.queue ?? src.waiting;
@@ -84,7 +88,7 @@ export function parseColonyState(j: any): ColonyState {
   const spawn = readPos(src.spawn);
   return {
     ok: src.ok !== false, wall: num(src.wall ?? src.t), max: num(src.max ?? src.capacity ?? src.max_flies), night: typeof src.night === "boolean" ? src.night : null,
-    time: num(src.time ?? src.time_of_day), players: num(src.players), spawn, flies, queue, queued,
+    time: num(src.time ?? src.time_of_day), players: num(src.players), spawn, flies, queue, queued, turnS: num(src.turn_s), turns: num(src.turns, 0) as number,
     food: readPoints(src.food, "food"), torches: readPoints(src.torches, "torch"), mobs: readPoints(src.mobs ?? src.hostiles, "mob"),
   };
 }

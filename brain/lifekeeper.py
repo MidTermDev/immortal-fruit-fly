@@ -1,13 +1,15 @@
 """The life keeper (v3): every LOOP_S it looks at every alive fly that is running somewhere (body or pending body set)
 and, when its energy at the last checkpoint is under LOW_S, feeds it for free through the registry's keeper role
-(the operator pays only gas), up to FREE_PER_DAY seconds per fly per day. Anyone can add more life to any fly with
-BNB on the site; a fly that is not running does not age. State (today's grants) in state/lifekeeper.json.
+(the operator pays only gas), up to FREE_PER_DAY seconds per fly per day: a full day by default, so a fly running in
+one of our bodies never starves for want of BNB (the operator pays; that is the point). Anyone can add more life to
+any fly with BNB on the site, and that is what a fly needs for a body we do not feed (a pebble off the brain host);
+a fly that is not running does not age. State (today's grants) in state/lifekeeper.json.
    ../.venv/bin/python lifekeeper.py"""
 import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from registry import Registry
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.join(HERE, '..'); STATE = os.path.join(HERE, 'state', 'lifekeeper.json')
-LOOP_S = int(os.environ.get('LOOP_S', '120')); LOW_S = int(os.environ.get('LOW_S', '1800')); CHUNK_S = int(os.environ.get('CHUNK_S', '3600')); FREE_PER_DAY = int(os.environ.get('FREE_PER_DAY', '7200'))
+LOOP_S = int(os.environ.get('LOOP_S', '120')); LOW_S = int(os.environ.get('LOW_S', '1800')); CHUNK_S = int(os.environ.get('CHUNK_S', '3600')); FREE_PER_DAY = int(os.environ.get('FREE_PER_DAY', '86400'))
 ZERO = '0x0000000000000000000000000000000000000000'
 log = lambda *a: print(time.strftime('%H:%M:%S'), *a, flush=True)
 reg = Registry(key_path=os.path.join(ROOT, 'deploy.txt'))
@@ -16,8 +18,7 @@ log(f'life keeper {reg.address} on {reg.c.address}: keeper role {"yes" if reg.is
 while True:
     try:
         day = time.strftime('%Y-%m-%d'); used = st.setdefault(day, {})
-        n = reg.c.functions.totalMinted().call()
-        rows = reg.flies(list(range(1, n + 1))) if hasattr(reg, 'flies') else [reg.fly(i) for i in range(1, n + 1)]
+        n, rows = reg.all_flies()   # the registry index when it is fresh, else the chain
         fed = 0
         for i, f in enumerate(rows, 1):
             if not f['alive'] or (f['body'] == ZERO and f['pendingBody'] == ZERO) or int(f['energy']) >= LOW_S: continue

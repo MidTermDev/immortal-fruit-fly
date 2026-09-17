@@ -193,7 +193,7 @@ export function ColonyFigure({ id, origin, fly, serves }: { id: number; origin: 
 }
 
 // ---------------------------------------------------------------- the explainer (COLONY.md sections 1 to 3)
-function Explainer() {
+function Explainer({ turnS }: { turnS: number | null }) {
   return (
     <div className="care-grid">
       <div className="care-col">
@@ -206,7 +206,7 @@ function Explainer() {
       </div>
       <div className="care-col">
         <div className="care-t"><h3>What it costs</h3><span className="cost">1 s of life per second</span></div>
-        <p>Being in the Colony costs one second of life per second, from the fly&apos;s on-chain energy, committed at every checkpoint; flies that are not running do not age. Anyone can keep any fly alive with a little BNB paid to the registry (about 0.01 BNB a day; nothing is burned), and bread drops near it at the next poll, 5 s a loaf; it has to smell its way there. A zombie hit costs 60 s; the bot never fights back. At zero energy the fly dies on-chain, <i>starved in the Colony</i>, its brain preserved: resurrect it and assign it again. The Colony holds a fixed number of flies at once; the rest wait in a queue, and the speed of every brain is shown honestly.</p>
+        <p>Being in the Colony costs one second of life per second, from the fly&apos;s on-chain energy, committed at every checkpoint; flies that are not running do not age. Anyone can keep any fly alive with a little BNB paid to the registry (about 0.01 BNB a day; nothing is burned), and bread drops near it at the next poll, 5 s a loaf; it has to smell its way there. A zombie hit costs 60 s; the bot never fights back. At zero energy the fly dies on-chain, <i>starved in the Colony</i>, its brain preserved: resurrect it and assign it again. While a fly runs here the operator&apos;s keeper tops it up for free, so a fly in the Colony does not starve for want of BNB. The Colony holds a fixed number of flies at once; while others wait, each fly gets a turn of {turnS ? `${Math.round(turnS / 60)} minutes` : "an hour"}, is checkpointed, and handed back dormant and alive (assign it again for another turn); with nobody waiting a fly stays as long as it lives. The speed of every brain is shown honestly.</p>
       </div>
     </div>
   );
@@ -284,9 +284,10 @@ export default function Colony() {
   const max = state?.max ?? null;
   const queued = state?.queued ?? 0;
   const rt = flies.filter((f) => typeof f.realtime === "number"); const meanRt = rt.length ? rt.reduce((a, f) => a + (f.realtime as number), 0) / rt.length : null;
+  const turnNote = state?.turnS && queued > 0 ? `; turns of ${Math.round(state.turnS / 60)} min while others wait` : "";
   const queueLine = max !== null
-    ? `${queued === 0 ? "no fly is" : `${queued} ${queued === 1 ? "fly is" : "flies are"}`} waiting for a spot; the colony holds ${max}${flies.length ? `, ${flies.length} ${flies.length === 1 ? "is" : "are"} in it` : ", none is in it yet"}`
-    : `${queued === 0 ? "no fly is" : `${queued} ${queued === 1 ? "fly is" : "flies are"}`} waiting for a spot`;
+    ? `${queued === 0 ? "no fly is" : `${queued} ${queued === 1 ? "fly is" : "flies are"}`} waiting for a spot; the colony holds ${max}${flies.length ? `, ${flies.length} ${flies.length === 1 ? "is" : "are"} in it` : ", none is in it yet"}${turnNote}`
+    : `${queued === 0 ? "no fly is" : `${queued} ${queued === 1 ? "fly is" : "flies are"}`} waiting for a spot${turnNote}`;
   const condition = down === null ? "connecting…" : down ? "the Colony is not answering" : state?.night ? "live · night" : "live · day";
   const hostShort = origin ? origin.replace(/^https?:\/\//, "") : "unknown";
 
@@ -362,7 +363,7 @@ export default function Colony() {
                   {flies.length ? flies.map((f) => (
                     <button key={f.id} className={`fly-pick${picked === f.id ? " on" : ""}`} onClick={() => setPicked(f.id)} aria-pressed={picked === f.id} data-testid={`pick-${f.id}`}>
                       <span className={`dot${f.alive ? "" : " dead"}`} /><b>{f.name}</b><span className="id">#{pad(f.id)}</span>
-                      <span className="m">{f.alive ? colonyModeWord(f.mode) : "dead"} · {hms(f.energy)}{typeof f.realtime === "number" ? ` · ${f.realtime.toFixed(2)}× real time` : ""}{f.say ? ` · “${f.say}”` : ""}</span>
+                      <span className="m">{f.alive ? colonyModeWord(f.mode) : "dead"} · {hms(f.energy)}{typeof f.realtime === "number" ? ` · ${f.realtime.toFixed(2)}× real time` : ""}{typeof f.turnLeft === "number" ? ` · ${Math.max(1, Math.round(f.turnLeft / 60))} min left of its turn` : ""}{f.say ? ` · “${f.say}”` : ""}</span>
                     </button>))
                     : <div className="view-empty">{state ? "no fly is in the world yet" : "connecting to the Colony…"}</div>}
                   {state && state.queue.length > 0 && (<div className="queue-list"><span className="lbl">waiting for a spot</span>{state.queue.map((q) => <Link key={q.id} href={`/fly/?id=${q.id}`}>#{pad(q.id)} {q.name}</Link>)}</div>)}
@@ -388,7 +389,7 @@ export default function Colony() {
             <div><div className="num">The rules</div><h2>{state ? queueLine.charAt(0).toUpperCase() + queueLine.slice(1) + "." : "A colony as flies actually have them."}</h2></div>
             <p>Shared environment, shared memory of where the food is, no foreman. The flies do not know what Minecraft is: they smell, see looming, taste and steer, because that is what the connectome does; which item is food and what a zombie is are the body&apos;s translation, exactly as a real fly&apos;s body translates the world into receptor currents. {registered === false ? "The Colony body is not registered on the registry yet, so no fly can be handed to it until its supervisor starts and registers it; then: open a fly's page and hand it to the Colony, and it joins when the Colony accepts and a spot is free." : "To add a fly, open its page and hand it to the Colony; it joins when the Colony accepts and a spot is free."} <Link href="/docs/colony/">The full mapping, the life rules and the architecture →</Link></p>
           </div>
-          <Explainer />
+          <Explainer turnS={state?.turnS ?? null} />
         </div>
       </section>
     </main>
