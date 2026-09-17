@@ -1,0 +1,15 @@
+# footage, cuts, renders and the generated score stay out of git (see README.md to remake them)
+rec/
+clips/
+out/
+*.mp3
+*.log
+video/node_modules/
+video/public/clips/
+video/public/screens/
+video/public/fly.png
+video/public/*.mp3
+video/.claude/
+video/skills-lock.json
+video/*.log
+video/.agents/
