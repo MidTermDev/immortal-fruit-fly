@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="wrap">
             <Link className="brand" href="/"><span className="glyph">(@@)</span> Immortal Fruit Fly</Link>
             <nav className="nav">
-              <Link href="/#organism">Specimen 001</Link><Link href="/flies/">Flies</Link><Link href="/#care">Care</Link><Link href="/#circuit">Circuit</Link>
+              <Link href="/#organism">Specimen 001</Link><Link href="/flies/">Flies</Link><Link href="/colony/">Colony</Link><Link href="/#care">Care</Link><Link href="/#circuit">Circuit</Link>
               <Link href="/docs/vision/">Vision</Link><Link href="/docs/">Docs</Link>
             </nav>
             <span className="spacer" />

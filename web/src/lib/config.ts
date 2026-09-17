@@ -40,7 +40,20 @@ export const CFG = {
   core: "0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3",
   // Block FlyCore was deployed in (0 = unknown: event scans fall back to the registry's deploy block).
   coreDeployBlock: 122089807,
-  bodies: { arena: "0x47005543c06246124480D196a275327325695BEd", doom: "0x642ebC7fD62a24406d8A86885F0131472E641c86", host: "0x4fC3E7D1fAD1A8E7FAC849DAa5BfF0C8333fe2a6" },
+  bodies: { arena: "0x47005543c06246124480D196a275327325695BEd", doom: "0x642ebC7fD62a24406d8A86885F0131472E641c86", host: "0x4fC3E7D1fAD1A8E7FAC849DAa5BfF0C8333fe2a6", colony: "0x95187D9dBaF262aB3e1de52b71a20Ef171aEb3c5" },
+  // The Colony (COLONY.md): a Minecraft world on the VPS where many flies live at once, each a whole brain. Its public
+  // origin is fixed (DNS + nginx on the VPS), so the site prefers it to bodies(colony).uri; NEXT_PUBLIC_COLONY_URL
+  // overrides both for local development (http://localhost:8125, or a mock), and with it set a fly's page asks that
+  // origin whether it runs the fly, whatever body the registry names (as NEXT_PUBLIC_HOST_URL does for the brain host).
+  colonyUrl: "https://mc.immortalfly.app",
+  colonyOverride: process.env.NEXT_PUBLIC_COLONY_URL || "",
+  // The site's own proxy for the Colony's read-only JSON (/api/colony/…, src/app/api/colony/[...path]/route.ts), on hosts
+  // that run server code (Vercel; "0" on the GitHub Pages export). The site and the Colony are different origins, and a
+  // browser may only read a cross-origin answer that carries Access-Control-Allow-Origin; nginx in front of the Colony
+  // adds none, so the page also asks its own origin when the direct read is blocked (see lib/colony.ts).
+  colonyProxy: process.env.NEXT_PUBLIC_COLONY_PROXY === "1",
+  // The canonical site: every absolute link new code builds starts here (the GitHub Pages export is a mirror).
+  site: "https://www.immortalfly.app",
   // Element is the NFT marketplace that indexes BNB Chain collections (OpenSea does not list BSC).
   market: { name: "Element", asset: "https://element.market/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813", collection: "https://element.market/collections/immortal-fruit-flies-1" },
   ipfsGateway: "https://gateway.pinata.cloud/ipfs/",

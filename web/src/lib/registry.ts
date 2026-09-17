@@ -22,14 +22,20 @@ export function bodyName(addr: string, names: Record<string, string> = {}) {
   const a = addr.toLowerCase();
   if (a === CFG.bodies.arena.toLowerCase()) return "Arena";
   if (a === CFG.bodies.doom.toLowerCase()) return "DOOM";
+  if (a === CFG.bodies.colony.toLowerCase()) return "Colony";
   return names[a] || short(addr);
 }
 
-/** A body that is neither the arena nor DOOM: a pebble (or any other registered body) that runs the fly's on-chain core itself and cannot run the whole brain; the brain host runs that for it, or it sleeps (see bodyNote). */
+/** The Colony (COLONY.md): the shared Minecraft world on the VPS, a whole-brain body like the arena. */
+export function isColonyBody(addr: string) {
+  return !!addr && addr !== ZERO && addr.toLowerCase() === CFG.bodies.colony.toLowerCase();
+}
+
+/** A body that is neither the arena, DOOM nor the Colony: a pebble (or any other registered body) that runs the fly's on-chain core itself and cannot run the whole brain; the brain host runs that for it, or it sleeps (see bodyNote). */
 export function isCoreOnlyBody(addr: string) {
   if (!addr || addr === ZERO) return false;
   const a = addr.toLowerCase();
-  return a !== CFG.bodies.arena.toLowerCase() && a !== CFG.bodies.doom.toLowerCase();
+  return a !== CFG.bodies.arena.toLowerCase() && a !== CFG.bodies.doom.toLowerCase() && a !== CFG.bodies.colony.toLowerCase();
 }
 
 /** Where a fly's whole brain is, in one place, so every page says the same thing. A pebble body signs for the fly on
@@ -37,8 +43,9 @@ export function isCoreOnlyBody(addr: string) {
  *  (`hostServes` true), and sleep in the last committed snapshot when it does not (false, or null while unknown). */
 export function bodyNote(f: FlyRecord, hostServes: boolean | null, names: Record<string, string> = {}) {
   const name = bodyName(f.body, names);
-  const out = (kind: "none" | "whole" | "host" | "core", tag: string, note: string, title = "") => ({ kind, name, tag, label: tag ? `${name} ${tag}` : name, note, title });
+  const out = (kind: "none" | "whole" | "host" | "core" | "colony", tag: string, note: string, title = "") => ({ kind, name, tag, label: tag ? `${name} ${tag}` : name, note, title });
   if (!f.alive || f.body === ZERO) return out("none", "", "");
+  if (isColonyBody(f.body)) return out("colony", "(Minecraft)", "in the Colony (Minecraft): whole brain on the VPS, streamed live", "The Colony is a shared Minecraft world on the VPS: the fly's 139,248 neurons run there, sensing the world around its bot and driving it, and its life is streamed to the site");
   if (!isCoreOnlyBody(f.body)) return out("whole", "", `running in ${name}`);
   if (hostServes) return out("host", "· whole brain on the brain host", `running in ${name}, a pebble that signs for it while the brain host runs its whole brain`, "The pebble is the body on the registry and signs every commit; the brain host runs the 139,248 neurons for it and streams its life here");
   return out("core", "(core only: the whole brain sleeps)", `running in ${name}, core only: the whole brain sleeps`, "A pebble runs only the fly's on-chain compass core; the whole-brain snapshot is preserved until a whole-brain body, or the brain host, takes it up");
@@ -47,6 +54,13 @@ export function bodyNote(f: FlyRecord, hostServes: boolean | null, names: Record
 /** The brain host's origin for a page to probe: the development override, else the https origin the host registered as its body uri. */
 export function hostOrigin(uri: string) {
   if (CFG.hostOverride) { try { return new URL(CFG.hostOverride).origin; } catch { return ""; } }
+  return /^https:\/\//.test(uri || "") ? new URL(uri).origin : "";
+}
+
+/** The Colony's origin: the development override, else the fixed public origin (CFG.colonyUrl), else the https origin
+ *  the Colony registered as its body uri. Empty only when none of the three is a URL. */
+export function colonyOrigin(uri = "") {
+  for (const u of [CFG.colonyOverride, CFG.colonyUrl]) { if (u) { try { return new URL(u).origin; } catch {} } }
   return /^https:\/\//.test(uri || "") ? new URL(uri).origin : "";
 }
 

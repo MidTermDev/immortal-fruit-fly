@@ -12,13 +12,22 @@ Remote-body mode (REMOTE_BODY=1, started by flyhost.py; brain/HOST_PROTOCOL.md):
 registry is a pebble (BODY_ADDR) that cannot run 139,248 neurons. This process runs the brain and the world
 for it, never holds a key and never sends a transaction: the pebble streams /ws?lite=1, posts its senses to
 /sense, and fetches the signed-nothing /checkpoint and /final payloads it then commits itself.
+
+Colony mode (COLONY=1 or --colony, started by brain/colony/colony.py; COLONY.md): the same process with `World` swapped for
+`MinecraftWorld`. The fly's body is a mineflayer bot: the Node agent connects to the local WebSocket /agent, streams the bot's senses
+at 10 Hz and receives the motor frame at 10 Hz; the sim steps in real time as the arena does, applying the latest senses each world step.
+Feeds from the chain become pending food drops (GET /pending_drops, cleared by POST /dropped) that only the supervisor can summon into the
+world through RCON. Commits, interactions and deaths go through the Colony key (brain/body_colony.key) with the shared send lock.
+Checkpoints are trusted-body commits like DOOM's: the senses are not world events a verifier can regenerate, so they stay out of the applied
+log and are written to STATE/senses_<n>.jsonl (one file per checkpoint interval) for a later replay. COLONY_TEST=1 never pins or sends
+anything and passes the body check for the tests.
 """
-import os, sys, json, time, math, threading, hashlib, subprocess, asyncio, base64, signal, fcntl, re, copy
+import os, sys, json, time, math, threading, hashlib, subprocess, asyncio, base64, signal, fcntl, re, copy, queue
 import numpy as np
 os.environ.setdefault('NUMBA_NUM_THREADS', '16')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sim import WholeBrain, V0
-from world import World, WORLD_MS
+from world import World, WORLD_MS, MinecraftWorld
 from aiohttp import web
 from registry import Registry, sha256_file, IDENTITY, REGISTRY
 from web3 import Web3
@@ -27,16 +36,23 @@ from eth_account import Account
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLY_ID = int(os.environ.get('FLY_ID', '1'))
 REMOTE = os.environ.get('REMOTE_BODY') == '1' or '--remote-body' in sys.argv
-TEST_BODY = os.environ.get('FLYHOST_TEST_BODY', '') if (REMOTE and os.environ.get('REMOTE_BODY_TEST') == '1') else ''
-BODY_ADDR = os.environ.get('BODY_ADDR', '') if REMOTE else ''
-STATE = os.environ.get('STATE') or os.path.join(HERE, f'state_{FLY_ID}' if REMOTE else 'state'); SNAPS = os.environ.get('SNAPS') or os.path.join(HERE, 'snapshots')
+COLONY = os.environ.get('COLONY') == '1' or '--colony' in sys.argv
+if REMOTE and COLONY: print('a process is a remote body or the Colony body, not both'); sys.exit(2)
+COLONY_TEST = COLONY and os.environ.get('COLONY_TEST') == '1'   # the tests: the body check passes, nothing is pinned or sent
+COLONY_ADDR = (open(os.path.join(HERE, 'body_colony.address')).read().strip() if os.path.exists(os.path.join(HERE, 'body_colony.address')) else '') if COLONY else ''
+TEST_BODY = os.environ.get('FLYHOST_TEST_BODY', '') if (REMOTE and os.environ.get('REMOTE_BODY_TEST') == '1') else (COLONY_ADDR if COLONY_TEST else '')
+BODY_ADDR = os.environ.get('BODY_ADDR', '') if REMOTE else COLONY_ADDR
+STATE = os.environ.get('STATE') or os.path.join(HERE, f'state_{FLY_ID}' if REMOTE else (f'state_colony_{FLY_ID}' if COLONY else 'state')); SNAPS = os.environ.get('SNAPS') or os.path.join(HERE, 'snapshots')
 os.makedirs(STATE, exist_ok=True); os.makedirs(SNAPS, exist_ok=True)
 REGISTRY_DEPLOY_BLOCK = int(os.environ.get('REGISTRY_DEPLOY_BLOCK', '122001000'))
-BODY_KEY = os.path.join(HERE, 'body_arena.key')
+BODY_KEY = os.path.join(HERE, 'body_colony.key' if COLONY else 'body_arena.key')
+BODY_LABEL = 'Colony' if COLONY else 'Arena'; CAUSE = 'starved in the Colony' if COLONY else 'starved in the arena'
 RPC_LOGS = os.environ.get('RPC_LOGS', 'https://bsc-rpc.publicnode.com'); RPC_SEND = os.environ.get('RPC_SEND', 'https://bsc-dataseed.bnbchain.org')
 _rpcfile = os.path.join(HERE, 'rpc.txt')
 if os.path.exists(_rpcfile) and 'RPC_LOGS' not in os.environ: RPC_LOGS = RPC_SEND = open(_rpcfile).read().strip()
-reg = Registry() if REMOTE else Registry(key_path=BODY_KEY)   # a remote body reads and pins only: no key, ever
+reg = Registry() if (REMOTE or COLONY_TEST) else Registry(key_path=BODY_KEY)   # a remote body (and a Colony test) reads and pins only: no key, ever
+INTERACT_GAP = float(os.environ.get('INTERACT_GAP', '30' if COLONY else '0'))   # the Colony: at most one on-chain interaction per kind per 30 s (zombies at night would otherwise cost a transaction a jump); every event still enters the history root
+COLONY_TEST_PIN = os.environ.get('COLONY_TEST_PIN') == '1'   # the tests skip IPFS unless asked
 PORT = int(os.environ.get('PORT', '8123'))
 CHECKPOINT_EVERY = float(os.environ.get("CHECKPOINT_EVERY", "600"))
 LOCAL_SAVE_EVERY = 60.0
@@ -48,7 +64,7 @@ AUTH_SKEW = 120.0; FLY_TTL = 15.0; SENSE_GAP = 1.0
 APPLIED_MAX = 5000            # applied events kept in memory / in a snapshot's meta, beyond those since the chain's last committed step (a verifier needs every event of the interval)
 FINAL_FILE = os.path.join(STATE, 'final.json')   # the death payload, kept across restarts until the pebble has reported the death (HOST_PROTOCOL.md: /final waits for it)
 
-brain = WholeBrain(); world = World(brain, energy=float(os.environ.get('GENESIS_ENERGY', '3600')))
+brain = WholeBrain(); world = (MinecraftWorld if COLONY else World)(brain, energy=float(os.environ.get('GENESIS_ENERGY', '3600')))
 GENESIS_WORLD = copy.deepcopy(world.dump_state())   # the world as it is born, for a genesis instantiation
 world.on_event = lambda kind, text: note(kind, text) if kind != 'died' else None
 render_index = np.load(os.path.join(HERE, 'render_index.npy'))
@@ -60,6 +76,9 @@ chain_state = {'seen_block': 0, 'last_checkpoint': 0.0, 'checkpoints': 0, 'alive
 sim_alive = {'ok': False, 'last_step_at': 0.0}
 fly_cache = {'at': 0.0, 'rec': None}; pebble = {'name': ''}
 final = {'payload': None, 'death_at': None}; final_lock = threading.Lock(); checkpoint_lock = threading.Lock(); sense_state = {'last': 0.0}
+chain_state['pending_drops'] = []; drops_lock = threading.Lock()   # the Colony: feeds waiting for the supervisor to summon the bread
+agent = {'ws': None, 'senses_at': 0.0, 'frames': 0, 'connected_at': 0.0}; STOP = {'turn': 0.0, 'forward': 0.0, 'sprint': False, 'back': False, 'jump': False, 'eat': False, 'torch': False, 'say': ''}
+senses_rec = {'n': 0, 'f': None, 'path': '', 'lines': 0}; interact_last = {}
 from registry import RPC as _RPC
 SECRET = re.compile(re.escape(_RPC.rstrip('/')) + r'/?') if _RPC.startswith('http') else None
 
@@ -78,6 +97,49 @@ def atomic_write(path, data: bytes):
     os.replace(tmp, path)
 
 
+def record_senses(step, age_ms, s):
+    """The Colony's sense stream: one line per frame the world adopted, with the brain step it was applied at; a new file per checkpoint interval
+    (STATE/senses_<n>.jsonl). Senses are not world events a verifier can regenerate, so they never enter the applied log; given this stream the
+    brain is deterministic. Runs in the sim thread under `lock`."""
+    r = senses_rec
+    if r['f'] is None: r['path'] = os.path.join(STATE, f"senses_{r['n']}.jsonl"); r['f'] = open(r['path'], 'a'); r['lines'] = 0
+    r['f'].write(json.dumps({'step': int(step), 'age_ms': age_ms, 's': s}, separators=(',', ':')) + '\n'); r['lines'] += 1
+    if r['lines'] % 50 == 0: r['f'].flush()
+
+
+SENSES_KEEP_DAYS = float(os.environ.get('SENSES_KEEP_DAYS', '14'))   # finished sense streams are gzipped (~10x) and kept this long (six flies write ~1.4 GB a day raw)
+
+
+def rotate_senses():
+    """Caller holds `lock`: the current sense stream belongs to the checkpoint just taken; the next interval gets a new file. The finished file is
+    gzipped in the background (senses_<n>.jsonl.gz) and streams older than SENSES_KEEP_DAYS are removed."""
+    r = senses_rec
+    done = None
+    if r['f'] is not None:
+        try: r['f'].flush(); os.fsync(r['f'].fileno()); r['f'].close(); done = r['path']
+        except Exception: pass
+        r['f'] = None
+    r['n'] += 1; r['lines'] = 0
+    threading.Thread(target=pack_senses, args=(done,), daemon=True).start()
+
+
+def pack_senses(path):
+    import gzip, glob
+    try:
+        if path and os.path.exists(path):
+            with open(path, 'rb') as src, gzip.open(path + '.gz', 'wb', compresslevel=6) as dst:
+                for chunk in iter(lambda: src.read(1 << 20), b''): dst.write(chunk)
+            os.remove(path)
+        cutoff = time.time() - SENSES_KEEP_DAYS * 86400
+        for old in glob.glob(os.path.join(STATE, 'senses_*.jsonl.gz')):
+            if os.path.getmtime(old) < cutoff: os.remove(old)
+    except Exception as e:
+        log('sense stream packing failed:', repr(e)[:120])
+
+
+if COLONY: world.on_senses = record_senses
+
+
 def applied(ev):
     """Records a world event a verifier must replay (food, puff, predator, resurrect), numbered in the order it was applied. Caller holds `lock`."""
     chain_state['applied_seq'] += 1; ev['seq'] = chain_state['applied_seq']; chain_state['applied'].append(ev); return ev
@@ -92,8 +154,15 @@ def save_snapshot(tag):
     floor = int(chain_state.get('committed_step') or 0)   # events before the chain's last commit are in that commit's snapshot already; everything since must stay for the verifier
     chain_state['applied'] = [e for e in chain_state['applied'] if int(e.get('brain_step', 0)) >= floor][-APPLIED_MAX:]
     meta = {'hash': h, 'tag': tag, 'brain_step': brain.t, 'world': world_state, 'applied': chain_state['applied'], 'applied_seq': chain_state['applied_seq'], 'committed_step': floor, 'feeds_done': chain_state['feeds_done'][-2000:],
-            'seen_block': chain_state['seen_block'], 'alive_onchain': chain_state['alive_onchain'], 'fly_id': FLY_ID, 'registry': REGISTRY, 'body': pebble_name() if REMOTE else 'arena', 'connectome_sha256': IDENTITY['connectome_sha256'], 'saved_at': time.time(), 'server': 'brain/server.py'}
+            'seen_block': chain_state['seen_block'], 'alive_onchain': chain_state['alive_onchain'], 'fly_id': FLY_ID, 'registry': REGISTRY, 'body': pebble_name() if REMOTE else ('Colony' if COLONY else 'arena'), 'connectome_sha256': IDENTITY['connectome_sha256'], 'saved_at': time.time(), 'server': 'brain/server.py'}
     if REMOTE: meta.update({'body_addr': BODY_ADDR, 'host': True, 'known_roots': dict(list(chain_state['known_roots'].items())[-20:]), 'last_uri': chain_state['last_uri']})
+    if COLONY:
+        with drops_lock: drops = [dict(d) for d in chain_state['pending_drops']]
+        if senses_rec['f'] is not None:
+            try: senses_rec['f'].flush()
+            except Exception: pass
+        meta.update({'body_addr': BODY_ADDR, 'colony': True, 'known_roots': dict(list(chain_state['known_roots'].items())[-20:]), 'last_uri': chain_state['last_uri'], 'pending_drops': drops, 'senses_n': senses_rec['n'], 'senses_file': senses_rec['path'],
+                     'senses_lines': senses_rec['lines'], 'note': 'trusted-body commit: the senses (STATE/senses_<n>.jsonl, gzipped once the interval is over) are the replay input, not applied events'})
     if not os.path.exists(path) or tag in ('local', 'shutdown'):
         import io
         buf = io.BytesIO(); np.savez_compressed(buf, v=brain.v, g=brain.g, ref_until=brain.ref_until, ring=brain.ring, counts=brain.counts, t=brain.t, total=brain.total_spikes, meta=json.dumps(meta)); atomic_write(path, buf.getvalue())
@@ -113,8 +182,11 @@ def restore():
             w = {**w, 'age_ms': w['t_ms'], 'ate_total': w.get('ate', 0.0)}
         brain.load(path); world.load_state(w)
         for k in ('seen_block', 'alive_onchain', 'feeds_done', 'applied', 'applied_seq', 'committed_step', 'known_roots', 'last_uri'): chain_state[k] = st.get(k, chain_state[k])
+        if COLONY:
+            with drops_lock: chain_state['pending_drops'] = [dict(d) for d in st.get('pending_drops', [])]
+            senses_rec['n'] = int(st.get('senses_n', 0))
         log(f"restored {st['hash'][:12]} (age {world.age_ms/1000:.0f}s, gen {world.generation}, energy {world.energy:.0f}, {len(world.food)} food)")
-        if REMOTE and not world.alive: restore_final()
+        if (REMOTE or COLONY) and not world.alive: restore_final()
         return True
     except Exception as e:
         log('restore failed, refusing to start from genesis silently:', repr(e)[:200]); raise
@@ -180,6 +252,11 @@ def body_of(f):
     return TEST_BODY or f['body']
 
 
+def body_display():
+    """Who the body is, for the diary and the cause of death."""
+    return 'the Colony' if COLONY else (pebble_name() if REMOTE else 'the arena')
+
+
 def pebble_name():
     if not pebble['name'] and BODY_ADDR:
         try: pebble['name'] = reg.body(BODY_ADDR)['name'] or f'pebble {BODY_ADDR[:10]}'
@@ -216,7 +293,7 @@ def instantiate_remote(f, head, fresh):
     with lock:
         if ours:
             log(f"continuing our own state at step {brain.t:,} (chain: {root[:12]} at step {known:,})")
-            if not world.alive: log(f"the fly died here at step {brain.t:,} (generation {world.generation}) and the registry still says alive: staying dead, /final waits for the pebble")
+            if not world.alive: log(f"the fly died here at step {brain.t:,} (generation {world.generation}) and the registry still says alive: staying dead, /final waits for the " + ('death report' if COLONY else 'pebble'))
         else:
             m = {}
             if not uri:
@@ -231,7 +308,8 @@ def instantiate_remote(f, head, fresh):
             chain_state['applied_seq'] = max(int(chain_state['applied_seq']), int(m.get('applied_seq', 0)))   # the numbering continues from the snapshot's (a verifier replays (A.seq, B.seq])
             chain_state['known_roots'] = {root: brain.t}; chain_state['committed_step'] = brain.t; chain_state['last_uri'] = uri; chain_state['seen_block'] = head + 1
             world.energy = float(f['energy']); world.generation = int(f['generation'])
-            if TEST_BODY and os.environ.get('FLYHOST_TEST_ENERGY'): world.energy = float(os.environ['FLYHOST_TEST_ENERGY']); log(f'*** TEST MODE: starting energy overridden to {world.energy:.0f} s ***')
+            _e = os.environ.get('FLYHOST_TEST_ENERGY') if REMOTE else os.environ.get('COLONY_TEST_ENERGY')
+            if TEST_BODY and _e: world.energy = float(_e); log(f'*** TEST MODE: starting energy overridden to {world.energy:.0f} s ***')
             if not f['alive']: world.alive = False
             log(f"instantiated fly #{FLY_ID} from {uri or 'genesis'} (step {brain.t:,}, age {world.age_ms/1000:.0f}s, energy {world.energy:.0f}, gen {world.generation}, from body {m.get('body', 'none')})")
             if f['alive'] and not world.alive:   # the chain's state is a death snapshot and the record says alive: resurrected since it was written; applied like a Resurrected event, so a replay can follow
@@ -246,10 +324,13 @@ def poll_chain():
     try:
         f = fly_record(force=True) if REMOTE else reg.fly(FLY_ID)
         head = reg.w3.eth.block_number
-        if REMOTE:
+        if REMOTE or COLONY:
             hosting = body_of(f).lower() == BODY_ADDR.lower() and f['alive']
             if hosting and not chain_state['hosting']:
-                instantiate_remote(f, head, fresh=not chain_state.get('hosted_once')); chain_state['hosted_once'] = True; log(f"hosting fly #{FLY_ID} for {pebble_name()} ({BODY_ADDR})")
+                instantiate_remote(f, head, fresh=not chain_state.get('hosted_once')); chain_state['hosted_once'] = True; log(f"hosting fly #{FLY_ID} " + (f"in the Colony ({BODY_ADDR})" if COLONY else f"for {pebble_name()} ({BODY_ADDR})"))
+                if COLONY: chain_state['last_checkpoint'] = time.time()   # the first commit comes CHECKPOINT_EVERY after the start, not at every restart of six brains
+            elif not hosting and (chain_state['hosting'] or not chain_state.get('idle_said')):
+                chain_state['idle_said'] = True; log(f"fly #{FLY_ID} is not this body's (body {f['body'][:10]}, pending {f['pendingBody'][:10]}, alive {f['alive']}): the brain idles" + (' (the supervisor accepts assignments)' if COLONY else ''))
             if chain_state['known_roots'].get(f['stateRoot']) is not None: chain_state['committed_step'] = int(chain_state['known_roots'][f['stateRoot']])
         else:
             if f['pendingBody'].lower() == reg.address.lower():
@@ -262,7 +343,12 @@ def poll_chain():
         for ev in reg.events('Fed', frm, head, id=FLY_ID):
             key = ev['tx']
             if key in chain_state['feeds_done']: continue
-            secs = int(ev['seconds_']); frng = np.random.default_rng(int.from_bytes(hashlib.sha256(str(key).encode()).digest()[:8], 'big'))   # from the feed's tx, not world.rng: the world's own draws stay replayable
+            secs = int(ev['seconds_'])
+            if COLONY:   # the food is real bread in the world: only the supervisor (RCON) can summon it; it polls /pending_drops and confirms with /dropped
+                d = {'tx': key, 'seconds': secs, 'by': ev['by'], 'block': int(ev['block']), 'bread': max(1, math.ceil(secs / 5)), 'seen': time.time()}
+                with drops_lock: chain_state['pending_drops'].append(d); chain_state['feeds_done'].append(key)
+                log(f"fed {secs}s by {ev['by'][:10]}: {d['bread']} bread to drop near the fly (waiting for the supervisor)"); continue
+            frng = np.random.default_rng(int.from_bytes(hashlib.sha256(str(key).encode()).digest()[:8], 'big'))   # from the feed's tx, not world.rng: the world's own draws stay replayable
             ang = frng.random() * 2 * math.pi; r = 40 + frng.random() * 70
             with lock:
                 fd = world.place_food(world.x + r * math.cos(ang), world.y + r * math.sin(ang), secs, ev['by']); chain_state['feeds_done'].append(key)
@@ -273,7 +359,7 @@ def poll_chain():
                 with lock:
                     world.resurrect(int(ev['energy'])); world.generation = int(ev['generation'])
                     applied({'kind': 'resurrect', 'generation': int(ev['generation']), 'energy': int(ev['energy']), 'by': ev['by'], 'block': ev['block'], 'brain_step': brain.t})
-                if REMOTE: clear_final()
+                if REMOTE or COLONY: clear_final()
                 log(f"resurrected by {ev['by'][:10]} as generation {ev['generation']}")
         chain_state['seen_block'] = head + 1
     except Exception as e:
@@ -289,32 +375,58 @@ MEMORY_ROOT = hashlib.sha256(b'').hexdigest()   # the whole-brain model has no p
 
 
 def post_checkpoint():
+    """This body's own checkpoint (the arena's or the Colony's key): snapshot -> IPFS, fresh token metadata, commit(). Returns the payload
+    (HOST_PROTOCOL.md's shape) for the caller's information. COLONY_TEST: the snapshot is saved and hashed, the sense stream rotated, nothing pinned or sent."""
     try:
-        with lock: h, path = save_snapshot('checkpoint'); snap = world.snapshot(); step = brain.t   # the step the hash belongs to
-        cid, uri = reg.pin_snapshot(path)
+        with lock:
+            h, path = save_snapshot('checkpoint'); snap = world.snapshot(); step = brain.t   # the step the hash belongs to
+            if COLONY: chain_state['known_roots'][h] = step; rotate_senses()
+        if COLONY_TEST and not COLONY_TEST_PIN: uri = f'snapshots/{h}.npz'
+        else: cid, uri = reg.pin_snapshot(path)
         hr, ints = history_root()
+        if COLONY_TEST:
+            chain_state['last_checkpoint'] = time.time(); chain_state['checkpoints'] += 1; chain_state['last_hash'] = h; chain_state['last_uri'] = uri; chain_state['committed_step'] = step
+            log(f"*** TEST checkpoint {h[:12]} step {step:,} energy {int(snap['energy'])} ({len(ints)} interactions): saved, not committed ***")
+            return payload(h, uri, '', step, snap['energy'], hr, ints, snap)
         if not chain_state.get('portrait'): chain_state['portrait'] = reg.portrait_uri(FLY_ID)
-        muri, _ = reg.pin_metadata(FLY_ID, chain_state.get('portrait', ''), {'Age (s)': int(snap['t_ms'] / 1000), 'Spikes': snap['spikes_total'], 'Eaten (s)': int(snap['ate']), 'Jumps': snap['jumps']}, body_name='Arena',
+        muri, _ = reg.pin_metadata(FLY_ID, chain_state.get('portrait', ''), {'Age (s)': int(snap['t_ms'] / 1000), 'Spikes': snap['spikes_total'], 'Eaten (s)': int(snap['ate']), 'Jumps': snap['jumps']}, body_name=BODY_LABEL,
                                    state={'stateRoot': h, 'stateURI': uri, 'brainStep': step, 'energy': int(snap['energy']), 'alive': True})
         rc = reg.commit(FLY_ID, h, MEMORY_ROOT, uri, muri, step, int(snap['energy']), hr)
         chain_state['last_checkpoint'] = time.time(); chain_state['checkpoints'] += 1; chain_state['last_tx'] = rc['transactionHash'].hex(); chain_state['last_hash'] = h; chain_state['last_uri'] = uri; chain_state['committed_step'] = step
         log(f"commit {h[:12]} {uri} tx {chain_state['last_tx']} ({len(ints)} interactions)")
         reg.market_refresh(FLY_ID)
+        return payload(h, uri, muri, step, snap['energy'], hr, ints, snap)
     except Exception as e:
-        log('commit failed:', str(e)[:200])
+        log('commit failed:', str(e)[:200]); return None
 
 
 def note(kind, data):
-    """An interaction: recorded in the interval's history root and, for notable ones, as an on-chain event (the pebble sends those itself for a remote body)."""
+    """An interaction: recorded in the interval's history root and, for notable ones, as an on-chain event (the pebble sends those itself for a remote body;
+    the Colony queues them for its sender thread, at most one per kind per INTERACT_GAP seconds, so the sim never waits for a receipt)."""
     chain_state['interactions'].append({'t_ms': world.age_ms, 'kind': kind, 'data': data})
-    if REMOTE: return
+    if REMOTE or COLONY_TEST: return
+    if COLONY:
+        if INTERACT_GAP > 0 and time.time() - interact_last.get(kind, -1e9) < INTERACT_GAP: return   # in the history root, not a transaction
+        interact_last[kind] = time.time(); interact_q.put((kind, data)); return
     try: reg.interaction(FLY_ID, kind, data)
     except Exception as e: log('interaction failed:', str(e)[:120])
 
 
+interact_q = queue.Queue()
+
+
+def interact_loop():
+    while True:
+        kind, data = interact_q.get()
+        try: rc = reg.interaction(FLY_ID, kind, data); log(f"interaction {kind} {data!r} tx {rc['transactionHash'].hex()}")
+        except Exception as e: log('interaction failed:', str(e)[:120])
+
+
 def report_death():
-    """Retries until the registry agrees the fly is dead."""
-    with lock: h, path = save_snapshot('death'); step = brain.t; snap = world.snapshot()
+    """Retries until the registry agrees the fly is dead (the arena's and the Colony's own key)."""
+    with lock:
+        h, path = save_snapshot('death'); step = brain.t; snap = world.snapshot()
+        if COLONY: chain_state['known_roots'][h] = step; rotate_senses()
     try: cid, uri = reg.pin_snapshot(path)
     except Exception as e: log('pin failed', e); uri = f"snapshots/{h}.npz"
     muri = ''
@@ -324,9 +436,11 @@ def report_death():
         try:
             if not muri:
                 if not chain_state.get('portrait'): chain_state['portrait'] = reg.portrait_uri(FLY_ID)
-                muri, _ = reg.pin_metadata(FLY_ID, chain_state.get('portrait', ''), {'Age (s)': int(snap['t_ms'] / 1000), 'Spikes': snap['spikes_total'], 'Eaten (s)': int(snap['ate']), 'Jumps': snap['jumps'], 'Cause of death': 'starved in the arena'}, body_name='none',
+                muri, _ = reg.pin_metadata(FLY_ID, chain_state.get('portrait', ''), {'Age (s)': int(snap['t_ms'] / 1000), 'Spikes': snap['spikes_total'], 'Eaten (s)': int(snap['ate']), 'Jumps': snap['jumps'], 'Cause of death': CAUSE}, body_name='none',
                                            state={'stateRoot': h, 'stateURI': uri, 'brainStep': step, 'energy': 0, 'alive': False, 'deaths': int(f['deaths']) + 1})
-            rc = reg.died(FLY_ID, h, MEMORY_ROOT, uri, muri, step, 'starved in the arena'); log(f"death reported {h[:12]} tx {rc['transactionHash'].hex()}"); reg.market_refresh(FLY_ID)
+                if COLONY:
+                    hr, ints = history_root(); final['payload'] = {**payload(h, uri, muri, step, 0, hr, ints, snap), 'cause': CAUSE}
+            rc = reg.died(FLY_ID, h, MEMORY_ROOT, uri, muri, step, CAUSE); log(f"death reported {h[:12]} tx {rc['transactionHash'].hex()}"); reg.market_refresh(FLY_ID)
         except Exception as e:
             log('death report failed, retrying in 20 s:', str(e)[:160]); time.sleep(20)
 
@@ -338,7 +452,7 @@ def payload(h, uri, muri, step, energy, hr, ints, snap):
 
 
 def make_checkpoint():
-    """Saves + pins the snapshot and fresh token metadata for the state being committed; returns the commit payload (the pebble sends commit + interactions)."""
+    """Remote body: saves + pins the snapshot and fresh token metadata for the state being committed; returns the commit payload (the pebble sends commit + interactions)."""
     with checkpoint_lock:
         with lock: h, path = save_snapshot('checkpoint'); snap = world.snapshot(); step = brain.t; chain_state['known_roots'][h] = step
         cid, uri = reg.pin_snapshot(path)
@@ -355,22 +469,31 @@ def prepare_final():
     """After the death in the world: the death snapshot + metadata (Status dead, deaths + 1), as the payload for died(). Idempotent."""
     with final_lock:
         if final['payload']: return final['payload']
-        with lock: h, path = save_snapshot('death'); snap = world.snapshot(); step = brain.t; chain_state['known_roots'][h] = step
-        cid, uri = reg.pin_snapshot(path)
-        hr, ints = history_root(); f = fly_record(); cause = f'starved in {pebble_name()}'
-        if not chain_state.get('portrait'): chain_state['portrait'] = reg.portrait_uri(FLY_ID)
-        muri, _ = reg.pin_metadata(FLY_ID, chain_state.get('portrait', ''), {'Age (s)': int(snap['t_ms'] / 1000), 'Spikes': snap['spikes_total'], 'Eaten (s)': int(snap['ate']), 'Jumps': snap['jumps'], 'Cause of death': cause}, body_name='none',
-                                   state={'stateRoot': h, 'stateURI': uri, 'brainStep': step, 'energy': 0, 'alive': False, 'deaths': int(f['deaths']) + 1})
+        with lock:
+            h, path = save_snapshot('death'); snap = world.snapshot(); step = brain.t; chain_state['known_roots'][h] = step
+            if COLONY: rotate_senses()
+        cause = CAUSE if COLONY else f'starved in {pebble_name()}'
+        if COLONY_TEST and not COLONY_TEST_PIN: uri = f'snapshots/{h}.npz'; muri = ''; hr, ints = history_root()
+        else:
+            cid, uri = reg.pin_snapshot(path)
+            hr, ints = history_root(); f = fly_record()
+            if not chain_state.get('portrait'): chain_state['portrait'] = reg.portrait_uri(FLY_ID)
+            muri, _ = reg.pin_metadata(FLY_ID, chain_state.get('portrait', ''), {'Age (s)': int(snap['t_ms'] / 1000), 'Spikes': snap['spikes_total'], 'Eaten (s)': int(snap['ate']), 'Jumps': snap['jumps'], 'Cause of death': cause}, body_name='none',
+                                       state={'stateRoot': h, 'stateURI': uri, 'brainStep': step, 'energy': 0, 'alive': False, 'deaths': int(f['deaths']) + 1})
         chain_state['last_hash'] = h; chain_state['last_uri'] = uri
         final['payload'] = {**payload(h, uri, muri, step, 0, hr, ints, snap), 'cause': cause}; final['death_at'] = final['death_at'] or time.time()
         try: atomic_write(FINAL_FILE, json.dumps({'fly_id': FLY_ID, 'body_addr': BODY_ADDR, 'death_at': final['death_at'], 'payload': final['payload']}).encode())   # survives a restart: /final waits for the pebble however long it takes
         except Exception as e: log('final.json not written:', repr(e)[:120])
-        log(f"final {h[:12]} {uri} step {step:,} ready for the pebble: {cause}")
+        log(f"final {h[:12]} {uri} step {step:,} ready" + (' (TEST: not reported)' if COLONY_TEST else ' for the pebble') + f": {cause}")
         return final['payload']
 
 
 def on_death():
     final['death_at'] = final['death_at'] or time.time()
+    if COLONY_TEST:
+        try: prepare_final()
+        except Exception as e: log('final payload failed:', str(e)[:160])
+        return
     if not REMOTE: report_death(); return
     try: prepare_final()
     except Exception as e: log('final payload failed (retried on /final):', str(e)[:160])
@@ -410,7 +533,7 @@ restored = threading.Event()
 def sim_loop():
     restore(); restored.set()
     steps_per_frame = int(FRAME_MS / WORLD_MS); acc = np.zeros(len(render_index), np.uint8)
-    wall0 = time.time(); bio0 = world.age_ms / 1000.0; dead_reported = not world.alive and (not REMOTE or final['payload'] is not None); last_local = time.time()
+    wall0 = time.time(); bio0 = world.age_ms / 1000.0; dead_reported = not world.alive and (not (REMOTE or COLONY) or final['payload'] is not None); last_local = time.time()
     while True:
         try:
             if not chain_state['hosting']:
@@ -450,7 +573,9 @@ def public_chain_state():
 def on_term(*_):
     log('SIGTERM: saving state')
     try:
-        with lock: save_snapshot('shutdown')
+        with lock:
+            save_snapshot('shutdown')
+            if senses_rec['f'] is not None: senses_rec['f'].flush()
     except Exception as e: log('save on exit failed', e)
     os._exit(0)
 
@@ -485,7 +610,7 @@ async def state_handler(request):
 
 
 async def admin_commit(request):
-    if request.remote not in ('127.0.0.1', '::1'): return web.Response(status=403)
+    if not is_local(request): return web.Response(status=403)   # the tunnel connects from 127.0.0.1 too, but marks what it forwards
     threading.Thread(target=post_checkpoint, daemon=True).start(); return web.json_response({'ok': True})
 
 
@@ -493,6 +618,11 @@ async def health(request):
     age = time.time() - sim_alive['last_step_at']; ok = sim_alive['ok'] and age < 5; hdr = frame['hdr'] or {}
     d = {'ok': ok, 'sim_thread': sim_alive['ok'], 'frame_age_s': round(age, 1), 'alive': world.alive, 'age_ms': world.age_ms, 'last_checkpoint_age_s': round(time.time() - chain_state['last_checkpoint']) if chain_state['last_checkpoint'] else None, 'url': PUBLIC_URL['url']}
     if REMOTE: d.update({'realtime': hdr.get('realtime', 0.0), 'body': BODY_ADDR, 'fly': FLY_ID, 'hosting': chain_state['hosting'], 'test_mode': bool(TEST_BODY), 'dead_since': final['death_at'], 'final_ready': final['payload'] is not None})
+    if COLONY:
+        with drops_lock: nd = len(chain_state['pending_drops'])
+        d.update({'realtime': hdr.get('realtime', 0.0), 'body': BODY_ADDR, 'fly': FLY_ID, 'hosting': chain_state['hosting'], 'test_mode': COLONY_TEST, 'dead_since': final['death_at'], 'final_ready': final['payload'] is not None, 'colony': True,
+                  'agent': {'connected': agent['ws'] is not None, 'senses_age_s': round(time.time() - agent['senses_at'], 1) if agent['senses_at'] else None, 'frames': agent['frames']}, 'pending_drops': nd,
+                  'pos': hdr.get('pos'), 'mode': hdr.get('mode'), 'energy': hdr.get('energy'), 'checkpoints': chain_state['checkpoints'], 'senses_file': senses_rec['path'], 'senses_n': senses_rec['n']})
     return web.json_response(d, status=200 if ok else 503, headers=CORS)
 
 
@@ -546,6 +676,110 @@ async def final_handler(request):
     return web.json_response(p)
 
 
+# ------------------------------------------------------------------ the Colony: the agent socket, food drops, local admin (COLONY.md section 4)
+LOCAL = ('127.0.0.1', '::1', 'localhost')
+FORWARDED = ('X-Forwarded-For', 'X-Real-IP', 'Forwarded', 'Cf-Connecting-Ip')   # what a proxy in front of us (the supervisor, nginx, cloudflared) adds
+
+
+def is_local(request):
+    """From this machine and not through a proxy: the Colony supervisor, nginx and cloudflared all connect from 127.0.0.1, so a request that
+    carries a forwarding header is refused even from there (the supervisor refuses every non-public path itself; this is the second line)."""
+    return request.remote in LOCAL and not any(k in request.headers for k in FORWARDED)
+
+
+def local_only(fn):
+    """The agent, the supervisor and the tests speak to a Colony brain from this machine only (the supervisor proxies only the public paths)."""
+    async def h(request):
+        if not is_local(request): return web.json_response({'error': 'local only'}, status=403, headers=CORS)
+        return await fn(request)
+    return h
+
+
+@local_only
+async def agent_handler(request):
+    """The mineflayer agent: senses in (JSON, 10 Hz), the motor frame out (10 Hz). One agent at a time; a new connection replaces the old."""
+    from aiohttp import WSMsgType
+    ws = web.WebSocketResponse(heartbeat=20, max_msg_size=1 << 20); await ws.prepare(request)
+    old = agent['ws']; agent['ws'] = ws; agent['connected_at'] = time.time(); agent['frames'] = 0
+    if old is not None and not old.closed:
+        try: await old.close(code=1000, message=b'replaced by a new agent')
+        except Exception: pass
+    log('agent connected')
+
+    async def sender():
+        while not ws.closed:
+            m = world.take_motor() if (chain_state['hosting'] and world.alive) else dict(STOP)
+            rt = max(0.05, min(1.5, float((frame['hdr'] or {}).get('realtime') or 1.0)))
+            m['turn'] = m['turn'] * rt; m['realtime'] = rt   # turn is rad per second of the brain's time; the bot integrates it per wall second, so the speed of the sim is folded in here
+            try: await ws.send_str(json.dumps(m))
+            except Exception: break
+            await asyncio.sleep(0.1)
+    task = asyncio.create_task(sender())
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                try: s = json.loads(msg.data)
+                except ValueError: continue
+                if isinstance(s, dict): world.set_senses(s); agent['senses_at'] = time.time(); agent['frames'] += 1
+            elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR): break
+    finally:
+        task.cancel()
+        if agent['ws'] is ws: agent['ws'] = None
+        log(f"agent disconnected after {agent['frames']} frames")
+    return ws
+
+
+@local_only
+async def pending_drops(request):
+    """Feeds waiting to become bread in the world (the supervisor summons them near the bot and confirms with POST /dropped)."""
+    with drops_lock: drops = [dict(d) for d in chain_state['pending_drops']]
+    return web.json_response({'fly': FLY_ID, 'drops': drops, 'pos': world.pos, 'alive': world.alive, 'hosting': chain_state['hosting']}, headers=CORS)
+
+
+@local_only
+async def dropped(request):
+    try: d = await request.json(); tx = d['tx']
+    except Exception: return web.json_response({'ok': False, 'error': 'json {tx, items?, at?} expected'}, status=400)
+    with drops_lock:
+        mine = [x for x in chain_state['pending_drops'] if x['tx'] == tx]
+        chain_state['pending_drops'] = [x for x in chain_state['pending_drops'] if x['tx'] != tx]
+    if not mine: return web.json_response({'ok': False, 'error': 'no such pending drop'}, status=404)
+    x = mine[0]; at = d.get('at'); n = int(d.get('items', x['bread']))
+    world.log(f"fed {x['seconds']}s by {str(x['by'])[:10]}: {n} bread dropped nearby" + (f" at ({at[0]:.0f},{at[1]:.0f},{at[2]:.0f})" if isinstance(at, (list, tuple)) and len(at) == 3 else ''))
+    log(f"drop {tx[:10]} done: {n} bread for {x['seconds']}s"); return web.json_response({'ok': True, 'left': len(chain_state['pending_drops'])})
+
+
+@local_only
+async def admin_drop(request):
+    """COLONY_TEST only: a feed as if the chain had said so (the tests exercise the drop path without a transaction)."""
+    if not COLONY_TEST: return web.json_response({'error': 'test mode only'}, status=403)
+    try: d = await request.json(); secs = int(d.get('seconds', 5))
+    except Exception: return web.json_response({'ok': False}, status=400)
+    x = {'tx': d.get('tx') or f'test-{int(time.time() * 1000)}', 'seconds': secs, 'by': d.get('by', '0xtest'), 'block': 0, 'bread': max(1, math.ceil(secs / 5)), 'seen': time.time()}
+    with drops_lock: chain_state['pending_drops'].append(x); chain_state['feeds_done'].append(x['tx'])
+    return web.json_response({'ok': True, 'drop': x})
+
+
+@local_only
+async def admin_commit_colony(request):
+    """A checkpoint now (the supervisor or an operator); returns the payload that was (or, in test mode, would have been) committed."""
+    if not chain_state['hosting']: return web.json_response({'error': 'not hosting this fly'}, status=409)
+    if not world.alive: return web.json_response({'error': 'dead: see /final'}, status=409)
+    p = await asyncio.to_thread(post_checkpoint)
+    return web.json_response(p if p else {'error': 'checkpoint failed; see the log'}, status=200 if p else 503)
+
+
+@local_only
+async def colony_final(request):
+    """The death payload once the fly is dead in the world (kept across restarts; in test mode nothing was reported)."""
+    if world.alive: return web.json_response({'error': 'alive'}, status=409)
+    if final['payload'] is None and COLONY_TEST:
+        try: await asyncio.to_thread(prepare_final)
+        except Exception as e: return web.json_response({'error': str(e)[:200]}, status=503)
+    if final['payload'] is None: return web.json_response({'error': 'death being reported; no payload yet'}, status=503)
+    return web.json_response({**final['payload'], 'reported': not chain_state['alive_onchain']})
+
+
 def announce_url():
     """The site finds this body's live stream through bodies(arena).uri on the registry; keep it current."""
     url = PUBLIC_URL['url']
@@ -561,16 +795,25 @@ def announce_url():
 def main():
     signal.signal(signal.SIGTERM, on_term); signal.signal(signal.SIGINT, on_term)
     if REMOTE and not Web3.is_address(BODY_ADDR): log('REMOTE_BODY=1 needs BODY_ADDR (the pebble address)'); sys.exit(2)
-    if not REMOTE: threading.Thread(target=announce_url, daemon=True).start()
+    if COLONY and not Web3.is_address(BODY_ADDR): log('COLONY=1 needs brain/body_colony.address'); sys.exit(2)
+    if COLONY and not COLONY_TEST and (reg.address or '').lower() != BODY_ADDR.lower(): log('body_colony.key does not belong to body_colony.address; refusing'); sys.exit(2)
+    if not REMOTE and not COLONY: threading.Thread(target=announce_url, daemon=True).start()
+    if COLONY and not COLONY_TEST: threading.Thread(target=interact_loop, daemon=True).start()
     threading.Thread(target=sim_loop, daemon=True).start(); threading.Thread(target=chain_loop, daemon=True).start()
     app = web.Application()
     app.router.add_get('/ws', ws_handler); app.router.add_get('/state', state_handler); app.router.add_get('/health', health); app.router.add_get('/frame', frame_handler)
     if REMOTE: app.router.add_post('/sense', sense_handler); app.router.add_get('/checkpoint', checkpoint_handler); app.router.add_get('/final', final_handler)
+    elif COLONY:
+        app.router.add_get('/agent', agent_handler); app.router.add_get('/pending_drops', pending_drops); app.router.add_post('/dropped', dropped)
+        app.router.add_post('/admin/commit', admin_commit_colony); app.router.add_get('/final', colony_final); app.router.add_post('/admin/drop', admin_drop)
     else: app.router.add_post('/admin/commit', admin_commit)
     app.router.add_static('/snapshots', SNAPS, show_index=True)
     if REMOTE:
         log(f'remote body {BODY_ADDR} ({pebble_name()}): running the whole brain of fly #{FLY_ID} on registry {REGISTRY}; serving on :{PORT}; state {STATE}')
         if TEST_BODY: log(f'*** TEST MODE (REMOTE_BODY_TEST=1): the body check is overridden, {TEST_BODY} passes as the body of fly #{FLY_ID}; never run this in production ***')
+    elif COLONY:
+        log(f'Colony body {BODY_ADDR}: running the whole brain of fly #{FLY_ID} in a Minecraft body on registry {REGISTRY}; serving on :{PORT}; agent socket /agent; state {STATE}')
+        if COLONY_TEST: log(f'*** TEST MODE (COLONY_TEST=1): the body check is overridden (fly #{FLY_ID} runs as if the Colony had it), nothing is pinned or sent; never run this in production ***')
     else: log(f'arena body {reg.address} hosting fly #{FLY_ID} on registry {REGISTRY}; serving on :{PORT}')
     web.run_app(app, port=PORT, print=None, handle_signals=False)   # aiohttp would replace the SIGTERM handler above with its own, and the state would not be saved
 

@@ -11,7 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.join(HERE, '..
 REGISTRY = os.environ.get('FLYREGISTRY', '0x0eeB0A675720306Ef6f426Bd8560c1288848f813')
 TOKEN = '0x23791aa3b031659b593cf141a2bc76b0ad657777'
 RPC = os.environ.get('RPC_URL') or (open(os.path.join(HERE, 'rpc.txt')).read().strip() if os.path.exists(os.path.join(HERE, 'rpc.txt')) else 'https://bsc-dataseed.bnbchain.org')
-SITE = 'https://midtermdev.github.io/immortal-fruit-fly'
+SITE = "https://www.immortalfly.app"   # the site (Vercel); the GitHub Pages mirror is midtermdev.github.io/immortal-fruit-fly
 ABI = json.load(open(os.path.join(HERE, 'FlyRegistry.abi.json')))
 ERC20_ABI = json.loads('[{"name":"approve","type":"function","inputs":[{"name":"s","type":"address"},{"name":"a","type":"uint256"}],"outputs":[{"type":"bool"}]},{"name":"allowance","type":"function","stateMutability":"view","inputs":[{"name":"o","type":"address"},{"name":"s","type":"address"}],"outputs":[{"type":"uint256"}]}]')
 SENDLOCK = os.path.join(HERE, '.sendlock')

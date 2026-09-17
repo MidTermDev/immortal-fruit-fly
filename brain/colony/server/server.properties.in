@@ -1,0 +1,62 @@
+# Immortal Fruit Fly Colony: Paper server properties (template).
+# tools/run_server.sh copies this to server.properties on first start and always rewrites the
+# rcon.password line from server/rcon.txt (gitignored, generated once). Paper re-saves the live
+# file on every start; edit this template, not server.properties, for lasting changes.
+#
+# Network: nothing public. Only the local mineflayer bots and the supervisor's RCON connect.
+server-ip=127.0.0.1
+server-port=25565
+online-mode=false
+white-list=true
+enforce-whitelist=true
+max-players=20
+motd=Immortal Fruit Fly colony
+enable-rcon=true
+rcon.port=25575
+rcon.password=@RCON_PASSWORD@
+broadcast-rcon-to-ops=false
+enable-query=false
+enable-status=true
+enable-jmx-monitoring=false
+prevent-proxy-connections=false
+network-compression-threshold=256
+rate-limit=0
+# World: a small superflat plains (grass on dirt on stone on bedrock, surface at y=63 so the flies stand at y=64:
+# above the slime spawn height, and prismarine-viewer needs y>0). Open, lit only where the flies place torches.
+level-name=colony
+level-seed=139248
+level-type=minecraft:flat
+generator-settings={"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:stone","height":121},{"block":"minecraft:dirt","height":5},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains"}
+generate-structures=false
+max-world-size=128
+spawn-protection=0
+gamemode=survival
+force-gamemode=false
+difficulty=easy
+hardcore=false
+pvp=false
+allow-flight=true
+allow-nether=false
+spawn-monsters=true
+spawn-npcs=false
+spawn-animals=true
+view-distance=6
+simulation-distance=4
+entity-broadcast-range-percentage=100
+max-tick-time=60000
+sync-chunk-writes=true
+player-idle-timeout=0
+op-permission-level=4
+function-permission-level=2
+require-resource-pack=false
+resource-pack=
+resource-pack-sha1=
+enforce-secure-profile=false
+log-ips=false
+hide-online-players=false
+text-filtering-config=
+initial-enabled-packs=vanilla
+initial-disabled-packs=
+region-file-compression=deflate
+use-native-transport=true
+debug=false

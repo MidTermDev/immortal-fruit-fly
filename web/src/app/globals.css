@@ -335,3 +335,43 @@ input.text:focus, .field select:focus { border-color: var(--ink); outline: none;
   .prose table.data th { white-space: normal; }
   .prose a, .prose code { overflow-wrap: anywhere; }
 }
+
+/* ── the Colony (Colony.tsx): the world viewer, the map, the fly picker, the neurology panel ─────── */
+.p-view { height: clamp(320px, 52vh, 560px); margin-bottom: 30px; }
+.p-view.compact { height: clamp(260px, 40vh, 420px); }
+.p-view iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; background: var(--fig); }
+.p-view.empty { height: clamp(200px, 26vh, 300px); }
+.view-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; padding: 20px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; color: var(--fig-dim); }
+.view-tabs { position: absolute; top: 8px; right: 12px; z-index: 2; display: flex; gap: 1px; background: var(--fig-rule); border: 1px solid var(--fig-rule); }
+.view-tabs button { background: var(--fig); color: var(--fig-dim); font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding: 5px 9px; }
+.view-tabs button:hover { color: var(--fig-ink); }
+.view-tabs button.on { color: var(--fig-ink); background: var(--fig-2); box-shadow: inset 0 -1px 0 var(--red); }
+.b-map { min-height: 420px; }
+.picker { display: flex; flex-direction: column; min-height: 240px; max-height: 480px; overflow: auto; }
+.fly-pick { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 3px 10px; align-items: baseline; text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--fig-rule); color: var(--fig-ink); width: 100%; transition: background 0.12s; }
+.fly-pick:hover { background: var(--fig-2); }
+.fly-pick.on { background: var(--fig-2); box-shadow: inset 2px 0 0 var(--red); }
+.fly-pick b { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fly-pick .id { font-family: var(--mono); font-size: 11px; color: var(--fig-dim); }
+.fly-pick .m { grid-column: 2 / -1; font-family: var(--mono); font-size: 10.5px; color: var(--fig-dim); line-height: 1.5; }
+.fly-pick .dot { align-self: center; }
+.queue-list { padding: 11px 16px; display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 11.5px; color: var(--fig-dim); }
+.queue-list .lbl { color: var(--fig-dim); margin-bottom: 2px; }
+.queue-list a { color: var(--fig-ink); }
+.queue-list a:hover { color: var(--amber-fig); }
+.neuro-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.b-brain { min-height: clamp(320px, 44vh, 460px); }
+.b-brain.compact { min-height: clamp(280px, 36vh, 380px); }
+.b-brain canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-y; cursor: grab; }
+.b-brain canvas:active { cursor: grabbing; }
+.neuro-b { background: var(--fig); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.life-say { display: flex; flex-direction: column; gap: 3px; padding-bottom: 8px; border-bottom: 1px solid var(--fig-rule); }
+.life-say .lbl { color: var(--fig-dim); }
+.say { font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--fig-ink); line-height: 1.35; }
+.chk { border-top: 1px solid var(--fig-rule); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.chk-rows { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-family: var(--mono); font-size: 11px; }
+.chk-rows > span:nth-child(odd) { color: var(--fig-dim); letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
+.chk-rows > span:nth-child(even) { color: var(--fig-ink); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chk-rows a:hover { color: var(--amber-fig); }
+.neuro .cell-cap a:hover { color: var(--red); }
+@media (max-width: 1040px) { .neuro-grid { grid-template-columns: 1fr; } .picker { max-height: 360px; } }

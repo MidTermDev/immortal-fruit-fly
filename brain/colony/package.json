@@ -1,0 +1,19 @@
+{
+  "name": "flybrain-colony",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Minecraft body of the Immortal Fruit Fly Colony: a mineflayer bot per fly, a camera bot, and viewers.",
+  "type": "module",
+  "scripts": {
+    "agent": "node agent.mjs",
+    "camera": "node tools/camera.mjs",
+    "viewer": "node tools/viewer.mjs",
+    "check": "node --check agent.mjs && node --check tools/viewer.mjs && node --check tools/camera.mjs"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "mineflayer": "4.39.0",
+    "prismarine-viewer": "1.33.0",
+    "vec3": "^0.1.10"
+  }
+}

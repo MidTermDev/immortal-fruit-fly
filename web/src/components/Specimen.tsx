@@ -4,16 +4,22 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CFG } from "@/lib/config";
 import { Chain, LogScan } from "@/lib/chain";
-import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName, bodyNote, hostOrigin, isCoreOnlyBody, scanLabel } from "@/lib/registry";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, ipfs, pad, status, bodyName, bodyNote, hostOrigin, colonyOrigin, isCoreOnlyBody, isColonyBody, scanLabel } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
 import Core from "@/components/Core";
 import LifeStream, { probeHost, HostHealth } from "@/components/LifeStream";
+import { ColonyFigure } from "@/components/Colony";
+import { probeColonyFly } from "@/lib/colony";
 
 const EVENTS_BLOCKS = 80000;
 const HOST_POLL_MS = 60000;
 /** The brain host is asked whether it runs this fly when the fly is alive in a pebble (a registered body that is
  *  neither the arena nor DOOM); with the NEXT_PUBLIC_HOST_URL override set (local development) for any living fly. */
 const hostCandidate = (f: FlyRecord) => f.alive && (isCoreOnlyBody(f.body) || !!CFG.hostOverride);
+/** The Colony (COLONY.md) is asked whether it streams this fly when the fly is alive in the Colony; with the
+ *  NEXT_PUBLIC_COLONY_URL override set (local development) for any living fly, whatever body the registry names. */
+const colonyCandidate = (f: FlyRecord) => f.alive && (isColonyBody(f.body) || !!CFG.colonyOverride);
+type ColonyAnswer = { id: number; origin: string; serves: boolean | null };
 /** What the host said about fly `id`: serves is null until it has been asked. The answer is keyed by the fly it is
  *  about, so after a same-route navigation (a parent or child link) the previous fly's answer renders as "not asked". */
 type Host = { id: number; origin: string; serves: boolean | null; health: HostHealth | null };
@@ -32,6 +38,13 @@ export default function Specimen() {
   const [names, setNames] = useState<Record<string, string>>({});
   const [, setLiveUrl] = useState("");
   const [hostAnswer, setHost] = useState<Host>(notAsked(id));
+  const [colonyAnswer, setColony] = useState<ColonyAnswer>({ id, origin: "", serves: null });
+  const colonyUri = useRef("");   // bodies(colony).uri, the last resort for the Colony's origin
+  // Is the Colony a registered body yet? assign(id, Colony) reverts with NotRegistered() until its supervisor registers
+  // it (COLONY.md), so the picker offers it only when the registry says yes; null until the registry has answered.
+  const [colonyOpen, setColonyOpen] = useState<boolean | null>(null);
+  /** What the registry said; a Colony that is not a body cannot stay picked in the select (the wallet would only see a revert). */
+  const noteColonyOpen = (yes: boolean) => { setColonyOpen(yes); if (!yes) setTarget((t) => (t === CFG.bodies.colony ? CFG.bodies.arena : t)); };
   const misses = useRef(0);   // consecutive health probes the host did not answer, for the fly shown now
   const shown = useRef(id);   // the fly this page shows now; an answer still in flight for another one (a same-route navigation) is dropped
   const [wallet, setWallet] = useState<string | null>(null);
@@ -50,8 +63,9 @@ export default function Specimen() {
 
   const stale = () => shown.current !== id;   // the page moved on to another fly while this closure's work was in flight
   const refresh = async (ch: Chain) => {
+    ch.isBody(CFG.bodies.colony).then((yes) => !stale() && noteColonyOpen(yes)).catch(() => {});   // the registry's own test, refreshed with the record
     const rec = await ch.flyRecord(id); if (stale()) return; setF(rec);
-    const probing = probe(ch, rec);   // alongside the event scans, which can take seconds on the public RPCs
+    const probing = Promise.all([probe(ch, rec), probeColony(rec)]);   // alongside the event scans, which can take seconds on the public RPCs
     if (rec.uri && rec.uri.startsWith("ipfs://")) ch.metadataOf(rec.uri).then((m) => m && !stale() && setMeta(m));
     // one scan of the registry serves both lists (the second call reads from the first one's cache)
     const [{ events: mine, scan: sc }, { events: all }] = await Promise.all([ch.registryEvents(EVENTS_BLOCKS, id), ch.registryEvents(EVENTS_BLOCKS)]);
@@ -60,7 +74,7 @@ export default function Specimen() {
     setChildren(all.filter((e) => e.name === "Minted" && (Number(e.args.parentA) === id || Number(e.args.parentB) === id)).map((e) => ({ id: Number(e.args.id), name: e.args.name })));
     const bodies = new Set<string>(); for (const e of mine) { if (e.args.body) bodies.add(String(e.args.body).toLowerCase()); }
     for (const b of [rec.body, rec.pendingBody]) if (b && b !== ZERO) bodies.add(b.toLowerCase());
-    const nm: Record<string, string> = {}; for (const b of bodies) { try { const bi = await ch.bodyInfo(b); if (bi.name) nm[b] = bi.name; if (b === CFG.bodies.arena.toLowerCase() && /^https:\/\//.test(bi.uri)) setLiveUrl(bi.uri); } catch {} }
+    const nm: Record<string, string> = {}; for (const b of bodies) { try { const bi = await ch.bodyInfo(b); if (bi.name) nm[b] = bi.name; if (b === CFG.bodies.arena.toLowerCase() && /^https:\/\//.test(bi.uri)) setLiveUrl(bi.uri); if (b === CFG.bodies.colony.toLowerCase()) colonyUri.current = bi.uri; } catch {} }
     if (stale()) return;
     setNames(nm);
     await probing;
@@ -79,6 +93,16 @@ export default function Specimen() {
     misses.current = ok ? 0 : misses.current + 1;
     setHost((prev) => (ok ? { id, origin, serves: true, health } : prev.id === id && prev.serves && prev.origin === origin && misses.current < 2 ? prev : { id, origin, serves: false, health: null }));
   };
+  /** Does the Colony stream this fly? Its origin is fixed (or overridden); /fly/<id>/health answers for the flies it
+   *  runs. A fly whose body is the Colony but which the Colony does not serve is waiting for a spot (or the Colony is down). */
+  const probeColony = async (rec: FlyRecord) => {
+    if (stale()) return;
+    if (!colonyCandidate(rec)) { setColony({ id, origin: "", serves: null }); return; }
+    const origin = colonyOrigin(colonyUri.current);
+    const ok = origin ? await probeColonyFly(origin, id) : false;
+    if (stale()) return;
+    setColony({ id, origin, serves: ok });
+  };
   useEffect(() => {
     if (!id) return;
     shown.current = id; misses.current = 0;   // another fly on the same route: what was in flight for the last one is dropped
@@ -96,6 +120,13 @@ export default function Specimen() {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [f?.alive, f?.body, id]);
+  // the Colony accepts a queued fly when a spot frees up: ask again every minute while the page is visible
+  useEffect(() => {
+    if (!f || !colonyCandidate(f)) return;
+    const t = setInterval(() => { if (document.visibilityState === "visible") probeColony(f).catch(() => {}); }, HOST_POLL_MS);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f?.alive, f?.body, id]);
 
   const connect = async () => {
     const ch = chainRef.current; if (!ch) return setToast("Not connected to BNB Chain.");
@@ -109,7 +140,15 @@ export default function Specimen() {
   };
   const feed = () => { const n = Math.floor(Number(secs) || 0); if (n < 1) return setToast("At least one second."); run("Feed", () => chainRef.current!.feedFly(id, n, info!.feed), (rc) => `Fed ${fmt(n)} s of life in block ${fmt(rc.blockNumber)}. ${f?.body !== ZERO ? "The body places it as food; the fly has to find it." : "Banked until a body runs it."}`); };
   const resurrect = () => { const n = Math.floor(Number(resSecs) || 0); if (n < 60) return setToast("Give it at least 60 seconds to wake up with."); run("Resurrect", () => chainRef.current!.resurrectFly(id, n, info!.res, info!.feed), (rc) => `Resurrected in block ${fmt(rc.blockNumber)}. Now hand it to a body.`); };
-  const assign = () => { const to = target === "custom" ? custom.trim() : target; if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return setToast("That is not an address."); run("Assign", () => chainRef.current!.assignFly(id, to), (rc) => `Assigned to ${bodyName(to, names)} in block ${fmt(rc.blockNumber)}. It moves as soon as that body accepts and instantiates the brain.`); };
+  const assign = async () => {
+    const to = target === "custom" ? custom.trim() : target; if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return setToast("That is not an address.");
+    const ch = chainRef.current; if (!ch || !wallet) return setToast("Connect a wallet first.");
+    // the registry's own check, made here first: an unregistered body is a sentence on the page, not a transaction that
+    // reverts with NotRegistered() in the wallet. When the RPC cannot answer, the chain decides as before.
+    setBusy(true); let registered = true; try { registered = await ch.isBody(to); } catch {} finally { setBusy(false); }
+    if (!registered) { if (isColonyBody(to)) noteColonyOpen(false); return setToast(isColonyBody(to) ? "The Colony is not open yet: its body has not registered on the registry (its supervisor does that when it starts). Until then no fly can be handed to it." : `${short(to)} is not a registered body: the registry would refuse the hand-off (NotRegistered).`, 10000); }
+    run("Assign", () => ch.assignFly(id, to), (rc) => `Assigned to ${bodyName(to, names)} in block ${fmt(rc.blockNumber)}. It moves as soon as that body accepts and instantiates the brain.`);
+  };
   const breed = () => { const p = parseInt(partner, 10); if (!p || p === id) return setToast("Choose another fly you own."); const nm = childName.trim().slice(0, 40); if (!nm) return setToast("Name the child."); run("Breed", () => chainRef.current!.breedFlies(id, p, nm, info!.breed), (rc) => `A child was born in block ${fmt(rc.blockNumber)}.`); };
 
   if (!id) return <main className="wrap" style={{ padding: "60px 0" }}><p>Which fly? <Link href="/flies/">See the collection.</Link></p></main>;
@@ -117,6 +156,9 @@ export default function Specimen() {
   // no live figure, "Watch it live" or "whole brain on the brain host" carries over to a fly the host does not run
   const host = hostAnswer.id === id ? hostAnswer : notAsked(id);
   const hostServes = host.serves === true;
+  // the Colony figure: the fly's body is the Colony (streaming or waiting for a spot), or the override says the Colony runs it
+  const colony = colonyAnswer.id === id ? colonyAnswer : { id, origin: "", serves: null };
+  const inColony = !!f && f.alive && (isColonyBody(f.body) || colony.serves === true);
   const s = f ? status(f, names, host.serves) : null; const isOwner = !!(wallet && f && wallet.toLowerCase() === f.owner.toLowerCase());
   const bn = f ? bodyNote(f, host.serves, names) : null;
   // the body's name for the life figure: the registry's, else what the host says it is (a development override can run a dormant fly)
@@ -138,6 +180,7 @@ export default function Specimen() {
                 <a className="btn sm" href={`${CFG.market.asset}/${id}`} target="_blank" rel="noopener">Buy / sell on {CFG.market.name} ↗</a>
                 {f && f.body.toLowerCase() === CFG.bodies.arena.toLowerCase() && <Link className="btn sm" href="/#organism">Watch it live</Link>}
                 {f && hostServes && <a className="btn sm" href="#life">Watch it live</a>}
+                {inColony && <a className="btn sm" href="#colony">Watch it in the Colony</a>}
                 {f && f.stateURI && <a className="btn sm plain" href={ipfs(f.stateURI)} target="_blank" rel="noopener">Brain snapshot (IPFS) ↗</a>}
                 <a className="btn sm plain" href={`${CFG.explorer}/token/${CFG.registry}?a=${id}`} target="_blank" rel="noopener">BscScan →</a>
               </div>
@@ -145,7 +188,7 @@ export default function Specimen() {
             <aside className="chart" style={{ paddingBottom: 0 }}>
               <div className="chart-t"><b>Record</b><span className="lbl">from the registry</span></div>
               <div className="crow"><span>owner</span><span><a href={`${CFG.explorer}/address/${f?.owner}`} target="_blank" rel="noopener">{f ? short(f.owner) : "—"}</a>{isOwner ? " (you)" : ""}</span></div>
-              <div className="crow"><span>body</span><span>{f && bn ? (f.body !== ZERO ? (bn.kind === "host" || bn.kind === "core" ? <>{bn.name} <Link href="/docs/pebbles/" className="dim" title={bn.title}>{bn.tag}</Link></> : bn.label) : f.pendingBody !== ZERO ? `→ ${bodyName(f.pendingBody, names)} (pending)` : "none") : "—"}</span></div>
+              <div className="crow"><span>body</span><span>{f && bn ? (f.body !== ZERO ? (bn.kind === "host" || bn.kind === "core" ? <>{bn.name} <Link href="/docs/pebbles/" className="dim" title={bn.title}>{bn.tag}</Link></> : bn.kind === "colony" ? <>{bn.name} <Link href="/colony/" className="dim" title={bn.title}>{bn.tag}</Link></> : bn.label) : f.pendingBody !== ZERO ? `→ ${bodyName(f.pendingBody, names)} (pending)` : "none") : "—"}</span></div>
               <div className="crow"><span>energy at last checkpoint</span><span>{f ? hms(f.energy) : "—"}</span></div>
               <div className="crow"><span>generation · deaths</span><span>{f ? `${f.generation} · ${f.deaths}` : "—"}</span></div>
               <div className="crow"><span>brain step</span><span>{f ? fmt(f.brainStep) : "—"}<small className="dim"> ({f ? (f.brainStep / 10000).toFixed(0) : "—"} s lived)</small></span></div>
@@ -160,7 +203,7 @@ export default function Specimen() {
           <div className="care-grid" style={{ marginTop: 44 }}>
             <div className="care-col">
               <div className="care-t"><h3>Feed</h3><span className="cost">{info ? `${fmtTok(info.feed)} $FLY = 1 s` : ""}</span></div>
-              <p>{f && f.body !== ZERO ? (bn?.kind === "core" ? `${bodyName(f.body, names)} hears it at its next poll and refills its energy bar.` : bn?.kind === "host" ? `The brain host drops it as food near the fly at its next poll, and ${bodyName(f.body, names)} chirps; the fly has to smell its way there.` : `Food appears in ${bodyName(f.body, names)} at the next poll; the fly has to smell its way there.`) : "Banked as energy until a body runs it."} Anyone may feed any fly.</p>
+              <p>{f && f.body !== ZERO ? (bn?.kind === "core" ? `${bodyName(f.body, names)} hears it at its next poll and refills its energy bar.` : bn?.kind === "host" ? `The brain host drops it as food near the fly at its next poll, and ${bodyName(f.body, names)} chirps; the fly has to smell its way there.` : bn?.kind === "colony" ? "The Colony drops it as bread near the fly in the world at its next poll, 5 s a loaf; the fly has to smell its way there and eat." : `Food appears in ${bodyName(f.body, names)} at the next poll; the fly has to smell its way there.`) : "Banked as energy until a body runs it."} Anyone may feed any fly.</p>
               <div className="field"><input type="number" min={1} value={secs} onChange={(e) => setSecs(e.target.value)} aria-label="Seconds of life" /><button className="btn fill" disabled={busy || !f || !f.alive} onClick={wallet ? feed : connect}>{busy ? "…" : wallet ? "Feed" : "Connect"}</button></div>
               <div className="lbl">= {Number(secs) ? hms(Number(secs)) : "—"} of life · {wallet ? `${short(wallet)} · ${bal}` : ""}</div>
             </div>
@@ -172,9 +215,9 @@ export default function Specimen() {
                 <div className="lbl">wakes with {Number(resSecs) ? hms(Number(resSecs)) : "—"} · minimum 60 s</div>
               </>) : (<>
                 <div className="care-t"><h3>Hand it to a body</h3><span className="cost">owner or current body</span></div>
-                <p>A body downloads the last committed brain, checks its hash, and runs it. The arena streams live; DOOM sessions are run by the operator.</p>
+                <p>A body downloads the last committed brain, checks its hash, and runs it. The arena streams live; the <Link href="/colony/">Colony</Link> puts it in a shared Minecraft world with the other flies{colonyOpen === false ? " (not open yet: its body has not registered on the registry)" : ""}; DOOM sessions are run by the operator.</p>
                 <div className="field">
-                  <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Body"><option value={CFG.bodies.arena}>Arena (live, streams here)</option><option value={CFG.bodies.doom}>DOOM</option><option value="custom">Another body address…</option></select>
+                  <select value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Body"><option value={CFG.bodies.arena}>Arena (live, streams here)</option><option value={CFG.bodies.colony} disabled={colonyOpen === false}>{colonyOpen === false ? "Colony (not open yet: not a registered body)" : "Colony (Minecraft, shared world)"}</option><option value={CFG.bodies.doom}>DOOM</option><option value="custom">Another body address…</option></select>
                   <button className="btn" disabled={busy || !isOwner} onClick={assign} title={isOwner ? "" : "Only the owner (or the body running it) may do this"}>Assign</button>
                 </div>
                 {target === "custom" && <input className="text" placeholder="0x… a registered body" value={custom} onChange={(e) => setCustom(e.target.value)} aria-label="Body address" />}
@@ -190,6 +233,8 @@ export default function Specimen() {
           </div>
 
           {f && hostServes && host.origin && <LifeStream id={id} origin={host.origin} body={lifeBody} />}
+
+          {f && inColony && <ColonyFigure id={id} origin={colony.origin || colonyOrigin()} fly={f} serves={colony.serves === true} />}
 
           {CFG.core && f && <Core id={id} fly={f} chain={chain} wallet={wallet} connect={connect} toast={setToast} names={names} hostServes={hostServes} />}
 

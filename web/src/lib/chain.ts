@@ -216,6 +216,8 @@ export class Chain {
     return { id, name, owner, uri, connectome: f.connectome, model: Number(f.model), generation: Number(f.generation), deaths: Number(f.deaths), parentA: Number(f.parentA), parentB: Number(f.parentB), stateRoot: f.stateRoot, memoryRoot: f.memoryRoot, stateURI: f.stateURI, brainStep: Number(f.brainStep), energy: Number(f.energy), bornBlock: Number(f.bornBlock), lastCommitBlock: Number(f.lastCommitBlock), body: f.body, pendingBody: f.pendingBody, alive: f.alive };
   }
   async bodyInfo(addr: string) { const b = await this.registry.bodies(addr); return { name: b.name, uri: b.uri, flies: Number(b.flies) }; }
+  /** The registry's own test for a body: `assign(id, body)` reverts with NotRegistered() unless `isBody[body]`. */
+  async isBody(addr: string) { return Boolean(await this.registry.isBody(addr)); }
   /** The registry's events (one fly's, when `flyId` is given), newest first, from the last `blocks` blocks but never
    *  before the registry existed. One scan serves every fly: the filter by id is applied to the decoded events. */
   registryEvents(blocks = 40000, flyId?: number): Promise<EventScan> {

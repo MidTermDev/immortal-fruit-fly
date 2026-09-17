@@ -1,0 +1,14 @@
+# The Paper installation is not tracked (jar, world, libraries, logs, caches, secrets): only its config files are.
+server/*
+!server/eula.txt
+!server/server.properties.in
+!server/config/
+server/config/*
+!server/config/paper-world-defaults.yml
+# generated at start from server.properties.in + rcon.txt (contains the RCON password): never tracked
+server/server.properties
+server/rcon.txt
+server/server.pid
+node_modules/
+*.log
+*.pid

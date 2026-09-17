@@ -227,13 +227,16 @@ class ChainLog:
             buf = io.BytesIO(); np.savez_compressed(buf, v=b.v, g=b.g, ref_until=b.ref_until, ring=b.ring, counts=b.counts, t=b.t, total=b.total_spikes, meta=json.dumps({'hash': h, 'tag': tag, 'brain_step': b.t, 'body': 'doom', 'fly_id': FLY_ID, 'registry': REGISTRY, 'connectome_sha256': IDENTITY['connectome_sha256'], 'saved_at': time.time()}))
         path = os.path.join(SNAPS, f"{h}.npz"); open(path, 'wb').write(buf.getvalue()); return h, path, step
 
-    def hand_back(self, to_body):
-        """Final commit, then assign the fly to another body (the current body may do this)."""
+    def hand_back(self, to_body=None):
+        """Final commit and the "left DOOM" line; then, with `to_body`, assign the fly to that body (the current body may do this). With none, the
+        fly stays in DOOM custody with no pending assignment (accept cleared pendingBody) for the caller to `release` (doom_host.py does): a
+        hand-back to DOOM itself would set pendingBody = DOOM, which release never clears, and the fly would show as waiting for DOOM forever."""
         self.q.join()
         h, path, step = self.snapshot('handoff'); cid, uri = self.reg.pin_snapshot(path)
         rc = self.reg.commit(FLY_ID, h, MEMORY_ROOT, uri, self._metadata(h, uri, step), step, int(max(0, self.energy)), hashlib_root(self.decisions[-60:]))
         self.reg.interaction(FLY_ID, 'doom', f'left DOOM after {len(self.decisions)} decisions; brain {h[:12]} committed at {uri}')
-        self.reg.assign(FLY_ID, to_body); print(f'final commit {h[:12]} block {rc["blockNumber"]}; handed to {to_body}')
+        if to_body: self.reg.assign(FLY_ID, to_body); print(f'final commit {h[:12]} block {rc["blockNumber"]}; handed to {to_body}')
+        else: print(f'final commit {h[:12]} block {rc["blockNumber"]}; left in DOOM custody, no pending assignment (the caller releases it)')
         return h
 
 
@@ -309,7 +312,7 @@ class Recorder:
 
 # ------------------------------------------------------------------ main
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--minutes', type=float, default=5); ap.add_argument('--out', default=os.path.join(HERE, 'doom_run')); ap.add_argument('--scenario', default='defend_the_center.cfg'); ap.add_argument('--no-chain', action='store_true'); ap.add_argument('--decision-every', type=float, default=1.2); ap.add_argument('--core-every', type=float, default=1.5); ap.add_argument('--commit-every', type=float, default=60); ap.add_argument('--hand-back', default=None, help='body address to hand the fly to at the end (default: the arena)')
+    ap = argparse.ArgumentParser(); ap.add_argument('--minutes', type=float, default=5); ap.add_argument('--out', default=os.path.join(HERE, 'doom_run')); ap.add_argument('--scenario', default='defend_the_center.cfg'); ap.add_argument('--no-chain', action='store_true'); ap.add_argument('--decision-every', type=float, default=1.2); ap.add_argument('--core-every', type=float, default=1.5); ap.add_argument('--commit-every', type=float, default=60); ap.add_argument('--hand-back', default=None, help="body address to hand the fly to at the end (default: the arena), or 'none': final commit only, the fly stays in DOOM custody with no pending assignment for the caller to release (doom_host.py)")
     a = ap.parse_args()
     pl = Player(); print('whole brain up'); time.sleep(2)
     ch = None if a.no_chain else ChainLog(pl)
@@ -368,7 +371,7 @@ def main():
     final_hash = None
     if ch:
         to = a.hand_back or open(os.path.join(HERE, 'body_arena.address')).read().strip()
-        final_hash = ch.hand_back(to)
+        final_hash = ch.hand_back(None if to.lower() == 'none' else to)
     pl.running = False
     summary = {'fly_id': FLY_ID, 'registry': REGISTRY, 'final_hash': final_hash, 'commits': ch.commits if ch else [], 'minutes': a.minutes, 'episodes': episodes, 'kills': stats['kills'], 'trigger_spikes': pl.trigger_spikes, 'turn_toward_frames': stats['toward'], 'turn_away_frames': stats['away'], 'decisions': ch.decisions if ch else [], 'core_txs': ch.core_txs if ch else [], 'core_replay_mismatches': ch.mismatch if ch else None, 'brain': BRAIN}
     json.dump(summary, open(os.path.join(a.out, 'run.json'), 'w'), indent=1)

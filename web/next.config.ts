@@ -11,7 +11,8 @@ const nextConfig: NextConfig = {
   basePath: isPages ? "/immortal-fruit-fly" : "",
   assetPrefix: isPages ? "/immortal-fruit-fly/" : undefined,
   reactStrictMode: true,
-  env: { NEXT_PUBLIC_BASE_PATH: isPages ? "/immortal-fruit-fly" : "", NEXT_PUBLIC_RPC_PROXY: proxy ? "1" : "0" },
+  // NEXT_PUBLIC_COLONY_PROXY: the same-origin proxy for the Colony's JSON (/api/colony/…) exists wherever server code runs.
+  env: { NEXT_PUBLIC_BASE_PATH: isPages ? "/immortal-fruit-fly" : "", NEXT_PUBLIC_RPC_PROXY: proxy ? "1" : "0", NEXT_PUBLIC_COLONY_PROXY: isPages ? "0" : "1" },
 };
 
 export default nextConfig;

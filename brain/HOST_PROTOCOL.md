@@ -30,7 +30,10 @@ hosted for a pebble lives at `<uri>/fly/<id>/…`.
 
 Every 15 s the supervisor (`brain/flyhost.py`) scans the registry: for each alive fly whose `body` is a registered body
 whose name starts with `Pebble`, it runs one `server.py --remote-body` process (env `FLY_ID`, `BODY_ADDR`, `PORT`,
-`NUMBA_NUM_THREADS`), and proxies `/fly/<id>/*` (HTTP and WebSocket) to it. A process is stopped when the fly is no
+`NUMBA_NUM_THREADS`), and proxies `/fly/<id>/<endpoint>` (HTTP and WebSocket) to it for the endpoints listed below and
+no other path (a child's local-only routes, such as the arena mode's `/admin/commit`, would see the proxy as
+127.0.0.1, so the host refuses them with 404 before they reach a child). `PORT` is `9000 + id` when that port is free
+on the machine, else the first free port from 19001 (Tor's SOCKS listener sits on 9050). A process is stopped when the fly is no
 longer that pebble's, or 10 minutes after it died (so the pebble can still fetch `/final`). Threads per process:
 `max(4, 16 // nflies)`; the frame carries `realtime` so every client can show the speed honestly.
 
