@@ -274,7 +274,8 @@ FRONT_DEG = 120.0       # a mob looms when it is in the front 120°
 MEET_RANGE = 6.0        # blocks: "met fly #n"
 MEET_EVERY_MS = 60_000.0
 SENSE_STALE_MS = 2000.0   # senses older than this (sim time) mean the body is gone: nothing to smell or see, energy still drains
-HIT_COST = 60.0         # the arena's predator rule
+HIT_COST = 0.0          # a mob's hit costs no life in the Colony: the fly is knocked about, knocked out and respawned by Minecraft, and only
+                        # starvation ends a life (the arena's -60 s rule drained a fly to death in minutes on a plain full of zombies)
 
 
 class MinecraftWorld(World):
@@ -480,11 +481,11 @@ class MinecraftWorld(World):
                 with self.mlock: self._torch_pending += 1
                 self.torches.append([round(self.pos[0], 1), round(self.pos[1], 1), round(self.pos[2], 1)]); self.torches = self.torches[-200:]
             self.prev_holding = self.holding
-            if s.get('died'): self.log('knocked out in the world: it wakes at the spawn')
+            if s.get('died'): self.log('knocked out by the mobs: it wakes at the campfire (no life lost; only starving kills a fly)')
             # a hit: the arena's predator rule
             if self.hit and not self.prev_hit and self.age_ms - self.last_hit_ms > 500:
-                self.last_hit_ms = self.age_ms; self.hits += 1; self.energy -= HIT_COST
-                self.log(f'caught: hit by a mob, -{HIT_COST:.0f} s', 'caught'); self._say('ouch')
+                self.last_hit_ms = self.age_ms; self.hits += 1; self.energy = max(0.0, self.energy - HIT_COST)
+                self.log('caught: hit by a mob' + (f', -{HIT_COST:.0f} s' if HIT_COST else ''), 'caught'); self._say('ouch')
             self.prev_hit = self.hit
             # meetings
             for f in self.flies:
