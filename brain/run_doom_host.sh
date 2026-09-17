@@ -6,7 +6,7 @@
 cd "$(dirname "$0")"
 export PATH="$HOME/.foundry/bin:$PATH"        # doom.py needs cast (the on-chain compass core)
 export DOOM_SESSION_MIN=${DOOM_SESSION_MIN:-5}
-export DOOM_THREADS=${DOOM_THREADS:-12}
+export DOOM_THREADS=${DOOM_THREADS:-8}
 export DOOM_STOP_GRACE=${DOOM_STOP_GRACE:-120}
 unset DOOM_DRY
 if [ -f doom_host.pid ]; then

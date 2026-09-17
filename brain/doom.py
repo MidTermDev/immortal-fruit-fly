@@ -69,7 +69,9 @@ class Player:
         self.scene = {'scent_l': 0.0, 'scent_r': 0.0, 'loomL': 0.0, 'loomR': 0.0, 'sizeL': 0.0, 'sizeR': 0.0, 'lightL': 0.3, 'lightR': 0.3}
         self.steer = 0.0; self.fire_pending = 0; self.trigger_spikes = 0; self.chunk_ms = 50
         self.lock = threading.Lock(); self.slock = threading.Lock(); self.flock = threading.Lock(); self.running = True; self.hash_req = None
-        threading.Thread(target=self._loop, daemon=True).start()
+        self._thread = threading.Thread(target=self._loop, daemon=True); self._thread.start()
+
+    def thread_alive(self): return self._thread.is_alive()
 
     def _loop(self):
         b = self.b; ms = self.chunk_ms
@@ -122,8 +124,9 @@ class Player:
     def snapshot_hash(self):
         """Hash of the whole brain at the next 50 ms chunk boundary (never a placeholder)."""
         req = {}; self.hash_req = req
-        for _ in range(400):
+        for _ in range(6000):   # up to 60 s: the first chunk after start-up includes the kernel's JIT and the machine may be shared
             if self.hash_req is None and req: return req
+            if not self.thread_alive(): raise RuntimeError('brain thread died')
             time.sleep(0.01)
         raise RuntimeError('brain thread did not answer the hash request')
 

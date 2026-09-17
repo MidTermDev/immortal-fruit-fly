@@ -5,6 +5,7 @@
 # (HTTP and WebSocket) to 127.0.0.1:8125. Pidfile colony.pid, log colony.log (both in this directory).
 cd "$(dirname "$0")"
 export COLONY_PORT=${COLONY_PORT:-8125}
+export COLONY_THREADS=${COLONY_THREADS:-10}   # shared with the arena, the brain host and DOOM on this box
 export PUBLIC_URL=${PUBLIC_URL:-https://mc.immortalfly.app}
 if [ -f colony.pid ]; then
   PID=$(cat colony.pid)

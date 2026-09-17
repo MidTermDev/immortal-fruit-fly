@@ -3,6 +3,7 @@
 # and announces the tunnel url as the "Brain host" body on the registry. Like run.sh, on HOST_PORT (8124).
 cd "$(dirname "$0")"
 export HOST_PORT=${HOST_PORT:-8124}
+export HOST_THREADS=${HOST_THREADS:-10}     # the arena (fly #1), the Colony and DOOM share the 32 cores
 for f in host.pid host_tunnel.pid; do
   [ -f "$f" ] && PID=$(cat "$f") && kill "$PID" 2>/dev/null && for i in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
 done

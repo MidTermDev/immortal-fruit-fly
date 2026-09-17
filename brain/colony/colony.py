@@ -454,9 +454,12 @@ async def proxy_to(request, port, path):
     url = f'http://127.0.0.1:{port}/{path}' + (f'?{request.query_string}' if request.query_string else '')
     if request.headers.get('Upgrade', '').lower() == 'websocket': return await proxy_ws(request, url)
     headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP}; headers['X-Forwarded-For'] = forwarded(request)
+    # ask the upstream for an uncompressed body: the viewer's express answers a browser's "br" with Brotli, which aiohttp
+    # cannot decode (502 for the 1.2 MB viewer bundle); nginx compresses on the way out anyway
+    headers['Accept-Encoding'] = 'identity'
     try:
         async with request.app['session'].request(request.method, url, headers=headers, data=await request.read(), allow_redirects=False, timeout=ClientTimeout(total=900)) as r:
-            body = await r.read(); rh = {k: v for k, v in r.headers.items() if k.lower() not in HOP}; rh.update(CORS)
+            body = await r.read(); rh = {k: v for k, v in r.headers.items() if k.lower() not in HOP and k.lower() not in ('content-encoding', 'content-length')}; rh.update(CORS)
             return web.Response(status=r.status, body=body, headers=rh)
     except Exception as e:
         return web.json_response({'error': f'upstream on :{port} unreachable: {repr(e)[:80]}'}, status=502, headers=CORS)

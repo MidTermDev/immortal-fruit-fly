@@ -238,6 +238,9 @@ def run_session(fid, why):
         fails[fid] = fails.get(fid, 0) + 1; blocked[fid] = time.time() + (RETRY_AFTER if fails[fid] < MAX_FAILS else 10 ** 12)
         log(f"fly #{fid}: failure {fails[fid]}/{MAX_FAILS}; " + (f'retry in {RETRY_AFTER:.0f} s' if fails[fid] < MAX_FAILS else 'parked until this host restarts'))
     if interrupted and stopping.is_set(): log(f'fly #{fid}: left in DOOM custody (host stopping); the next start resumes it as a left-over')
+    elif not ok and entry['decisions'] == 0 and fails.get(fid, 0) < MAX_FAILS:
+        # nothing happened for the fly: keep custody (it stays body == DOOM, a left-over the queue retries) and say nothing on-chain
+        log(f'fly #{fid}: no decisions were made; keeping custody for the retry, no summary, no release')
     elif not finish_session(fid, entry, ok): unfinished[fid] = entry
     add_index(entry); return entry
 
