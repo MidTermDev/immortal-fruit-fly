@@ -15,8 +15,9 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     const r = await fetch(`${INDEX}/fly/${id}.json`, { cache: "no-store", signal: AbortSignal.timeout(3000) });
     if (r.ok) { const f = (await r.json()).fly; name = f.name || name; line = `${f.alive ? "Alive" : "Dead, brain preserved"} · generation ${f.gen} · ${f.deaths ? `died ${f.deaths}× and came back` : "never died"} · a whole fruit-fly brain on BNB Smart Chain.`; }
   } catch {}
-  const title = `${name} · Specimen ${String(id).padStart(3, "0")}`;
-  const image = `${CFG.site}/api/og/${id}`;
+  const spec = `Specimen ${String(id).padStart(3, "0")}`;
+  const title = name.toLowerCase() === spec.toLowerCase() ? spec : `${name} · ${spec}`;
+  const image = `${CFG.site}/api/og/${id}/`;   // with the slash: the site redirects without it, and not every crawler follows
   return { title, description: line, openGraph: { title, description: line, images: [{ url: image, width: 1200, height: 630 }], url: `${CFG.site}/f/${id}` }, twitter: { card: "summary_large_image", title, description: line, images: [image] } };
 }
 
