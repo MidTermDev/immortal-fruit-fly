@@ -103,6 +103,8 @@ setblock 0 64 -8 minecraft:torch
 setblock 8 64 0 minecraft:torch
 setblock -8 64 0 minecraft:torch
 CMDS
+  # trees, flowers, ponds, berry bushes, hay and the campfire ring: once (a marker block remembers)
+  "$(dirname "$0")/../../../.venv/bin/python" "$(dirname "$0")/build_glade.py" || true
 }
 
 stop() {
