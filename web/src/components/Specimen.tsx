@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CFG } from "@/lib/config";
-import { Chain, LogScan, LifeInfo } from "@/lib/chain";
-import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, short, hms, dur, ipfs, pad, status, bodyName, bodyNote, hostOrigin, colonyOrigin, isCoreOnlyBody, isColonyBody, scanLabel, mergeEvents, inBody } from "@/lib/registry";
+import { Chain, LogScan } from "@/lib/chain";
+import { FlyRecord, RegistryInfo, Ev, ZERO, fmt, fmtTok, fmtBnb, short, hms, ipfs, pad, status, bodyName, bodyNote, hostOrigin, colonyOrigin, isCoreOnlyBody, isColonyBody, scanLabel, inBody, lifeCost } from "@/lib/registry";
 import { RecordList } from "@/components/Record";
 import Core from "@/components/Core";
 import KeepAlive from "@/components/KeepAlive";
@@ -35,7 +35,6 @@ export default function Specimen() {
   const [info, setInfo] = useState<RegistryInfo | null>(null);
   const [events, setEvents] = useState<Ev[]>([]);
   const [scan, setScan] = useState<LogScan | null>(null);
-  const [life, setLife] = useState<LifeInfo | null>(null);   // its standing with the LifeFund, as KeepAlive reads it
   const [children, setChildren] = useState<{ id: number; name: string }[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
   const [, setLiveUrl] = useState("");
@@ -51,7 +50,6 @@ export default function Specimen() {
   const shown = useRef(id);   // the fly this page shows now; an answer still in flight for another one (a same-route navigation) is dropped
   const [wallet, setWallet] = useState<string | null>(null);
   const [bal, setBal] = useState("");
-  const [secs, setSecs] = useState("600");
   const [resSecs, setResSecs] = useState("1800");
   const [target, setTarget] = useState(CFG.bodies.arena);
   const [custom, setCustom] = useState("");
@@ -69,11 +67,10 @@ export default function Specimen() {
     const rec = await ch.flyRecord(id); if (stale()) return; setF(rec);
     const probing = Promise.all([probe(ch, rec), probeColony(rec)]);   // alongside the event scans, which can take seconds on the public RPCs
     if (rec.uri && rec.uri.startsWith("ipfs://")) ch.metadataOf(rec.uri).then((m) => m && !stale() && setMeta(m));
-    // one scan of the registry serves both lists (the second call reads from the first one's cache); the LifeFund's
-    // record of this fly (sponsored, kept, granted) is one small request and joins the registry's rows by block
-    const [{ events: mine, scan: sc }, { events: all }, { events: fund }] = await Promise.all([ch.registryEvents(EVENTS_BLOCKS, id), ch.registryEvents(EVENTS_BLOCKS), ch.lifeEvents(EVENTS_BLOCKS, id).catch(() => ({ events: [] as Ev[] }))]);
+    // one scan of the registry serves both lists (the second call reads from the first one's cache)
+    const [{ events: mine, scan: sc }, { events: all }] = await Promise.all([ch.registryEvents(EVENTS_BLOCKS, id), ch.registryEvents(EVENTS_BLOCKS)]);
     if (stale()) return;
-    setEvents(mergeEvents(mine, fund)); setScan(sc);
+    setEvents(mine); setScan(sc);
     setChildren(all.filter((e) => e.name === "Minted" && (Number(e.args.parentA) === id || Number(e.args.parentB) === id)).map((e) => ({ id: Number(e.args.id), name: e.args.name })));
     const bodies = new Set<string>(); for (const e of mine) { if (e.args.body) bodies.add(String(e.args.body).toLowerCase()); }
     for (const b of [rec.body, rec.pendingBody]) if (b && b !== ZERO) bodies.add(b.toLowerCase());
@@ -109,7 +106,6 @@ export default function Specimen() {
   useEffect(() => {
     if (!id) return;
     shown.current = id; misses.current = 0;   // another fly on the same route: what was in flight for the last one is dropped
-    setLife(null);
     (async () => {
       try { const ch = await new Chain().connectRead(); chainRef.current = ch; setChain(ch); setInfo(await ch.registryInfo()); await refresh(ch); }
       catch (e: any) { setErr(e.reason === "ERC721NonexistentToken" || /nonexistent/i.test(e.message || "") ? `Fly #${id} has not been minted.` : "Could not read this fly: " + (e.shortMessage || e.message)); }
@@ -142,8 +138,12 @@ export default function Specimen() {
     try { setToast(`${label}: confirm in your wallet…`, 120000); const rc = await fn(); await refresh(ch); setInfo(await ch.registryInfo()); setBal(fmtTok(await ch.balance()) + " FLY"); setToast(done(rc), 10000); }
     catch (e: any) { setToast(`Failed: ${e.shortMessage || e.reason || e.message}`, 9000); } finally { setBusy(false); }
   };
-  const feed = () => { const n = Math.floor(Number(secs) || 0); if (n < 1) return setToast("At least one second."); run("Feed", () => chainRef.current!.feedFly(id, n, info!.feed), (rc) => `Fed ${fmt(n)} s of life in block ${fmt(rc.blockNumber)}. ${f?.body !== ZERO ? "The body places it as food; the fly has to find it." : "Banked until a body runs it."}`); };
-  const resurrect = () => { const n = Math.floor(Number(resSecs) || 0); if (n < 60) return setToast("Give it at least 60 seconds to wake up with."); run("Resurrect", () => chainRef.current!.resurrectFly(id, n, info!.res, info!.feed), (rc) => `Resurrected in block ${fmt(rc.blockNumber)}. Now hand it to a body.`); };
+  /** What waking it with `n` seconds costs in wei: the flat fee plus the life, at the registry's price as last read. */
+  const resurrectCost = (n: number) => (info ? info.resurrectWei + lifeCost(n, info.lifeWeiPerSecond) : null);
+  const resurrect = () => {
+    const n = Math.floor(Number(resSecs) || 0); if (n < 60) return setToast("Give it at least 60 seconds to wake up with.");
+    run("Resurrect", async () => { const ch = chainRef.current!; const p = await ch.lifePrice(); return ch.resurrectFly(id, n, p.resurrectWei + lifeCost(n, p.lifeWeiPerSecond)); }, (rc) => `Resurrected in block ${fmt(rc.blockNumber)}. Now hand it to a body.`);
+  };
   const assign = async () => {
     const to = target === "custom" ? custom.trim() : target; if (!/^0x[0-9a-fA-F]{40}$/.test(to)) return setToast("That is not an address.");
     const ch = chainRef.current; if (!ch || !wallet) return setToast("Connect a wallet first.");
@@ -195,9 +195,7 @@ export default function Specimen() {
               <div className="chart-t"><b>Record</b><span className="lbl">from the registry</span></div>
               <div className="crow"><span>owner</span><span><a href={`${CFG.explorer}/address/${f?.owner}`} target="_blank" rel="noopener">{f ? short(f.owner) : "—"}</a>{isOwner ? " (you)" : ""}</span></div>
               <div className="crow"><span>body</span><span>{f && bn ? (f.body !== ZERO ? (bn.kind === "host" || bn.kind === "core" ? <>{bn.name} <Link href="/docs/pebbles/" className="dim" title={bn.title}>{bn.tag}</Link></> : bn.kind === "colony" ? <>{bn.name} <Link href="/colony/" className="dim" title={bn.title}>{bn.tag}</Link></> : bn.label) : f.pendingBody !== ZERO ? `→ ${bodyName(f.pendingBody, names)} (pending)` : "none") : "—"}</span></div>
-              <div className="crow"><span>energy at last checkpoint</span><span>{f ? hms(f.energy) : "—"}</span></div>
-              <div className="crow"><span>sponsored life</span><span title="Seconds of life paid for in BNB and not yet fed; the keeper feeds it from this while it lives somewhere">{life ? (life.credit ? `${dur(life.credit)} left` : "none") : "—"}</span></div>
-              <div className="crow"><span>fed by the fund</span><span title="Everything the LifeFund has ever fed this fly, sponsored and free">{life ? (life.fedTotal ? dur(life.fedTotal) : "nothing yet") : "—"}</span></div>
+              <div className="crow"><span>energy on the record</span><span title="Seconds of life at the last checkpoint, plus every feed since">{f ? hms(f.energy) : "—"}</span></div>
               <div className="crow"><span>generation · deaths</span><span>{f ? `${f.generation} · ${f.deaths}` : "—"}</span></div>
               <div className="crow"><span>brain step</span><span>{f ? fmt(f.brainStep) : "—"}<small className="dim"> ({f ? (f.brainStep / 10000).toFixed(0) : "—"} s lived)</small></span></div>
               <div className="crow"><span>checkpoints · jumps</span><span>{events.length ? `${commits} · ${jumps}` : "—"}</span></div>
@@ -209,18 +207,13 @@ export default function Specimen() {
           </div>
 
           <div className="care-grid" style={{ marginTop: 44 }}>
-            <KeepAlive key={id} id={id} alive={!!f && f.alive} where={where} chain={chain} wallet={wallet} connect={connect} toast={setToast} onSponsored={() => refresh(chainRef.current!)} onInfo={(li) => !stale() && setLife(li)}>
-              <div className="care-t"><h3 style={{ fontSize: 13.5 }}>Feed it $FLY</h3><span className="cost">{info ? `${fmtTok(info.feed)} $FLY = 1 s` : ""}</span></div>
-              <p>{f && f.body !== ZERO ? (bn?.kind === "core" ? `${bodyName(f.body, names)} hears it at its next poll and refills its energy bar.` : bn?.kind === "host" ? `The brain host drops it as food near the fly at its next poll, and ${bodyName(f.body, names)} chirps; the fly has to smell its way there.` : bn?.kind === "colony" ? "The Colony drops it as bread near the fly in the world at its next poll, 5 s a loaf; the fly has to smell its way there and eat." : `Food appears in ${bodyName(f.body, names)} at the next poll; the fly has to smell its way there.`) : "Banked as energy until a body runs it."} Anyone may feed any fly; this burns your own $FLY, one per second.</p>
-              <div className="field"><input type="number" min={1} value={secs} onChange={(e) => setSecs(e.target.value)} aria-label="Seconds of life" /><button className="btn" disabled={busy || !f || !f.alive} onClick={wallet ? feed : connect}>{busy ? "…" : wallet ? "Feed" : "Connect"}</button></div>
-              <div className="lbl">= {Number(secs) ? hms(Number(secs)) : "—"} of life · {wallet ? `${short(wallet)} · ${bal}` : ""}</div>
-            </KeepAlive>
+            <KeepAlive key={id} id={id} alive={!!f && f.alive} energy={f ? f.energy : null} where={where} chain={chain} wallet={wallet} connect={connect} toast={setToast} onFed={() => refresh(chainRef.current!)} />
             <div className="care-col">
               {f && !f.alive ? (<>
-                <div className="care-t"><h3>Resurrect</h3><span className="cost">{info ? `${fmtTok(info.res)} $FLY + food` : ""}</span></div>
-                <p>The brain continues from the exact state it died in, as generation {f.generation + 1}. Anyone may pay. Until then it cannot be transferred or sold.</p>
-                <div className="field"><input type="number" min={60} value={resSecs} onChange={(e) => setResSecs(e.target.value)} aria-label="Seconds of food to wake up with" /><button className="btn fill" disabled={busy} onClick={wallet ? resurrect : connect}>{busy ? "…" : wallet ? "Resurrect" : "Connect"}</button></div>
-                <div className="lbl">wakes with {Number(resSecs) ? hms(Number(resSecs)) : "—"} · minimum 60 s</div>
+                <div className="care-t"><h3>Resurrect</h3><span className="cost">{info ? `${fmtBnb(info.resurrectWei)} BNB + life` : ""}</span></div>
+                <p>The brain continues from the exact state it died in, as generation {f.generation + 1}. A flat fee plus the life it wakes with, in BNB; nothing is burned, no $FLY needed. Anyone may pay. Until then it cannot be transferred or sold.</p>
+                <div className="field"><input type="number" min={60} value={resSecs} onChange={(e) => setResSecs(e.target.value)} aria-label="Seconds of life to wake up with" /><button className="btn fill" disabled={busy} onClick={wallet ? resurrect : connect}>{busy ? "…" : wallet ? "Resurrect" : "Connect"}</button></div>
+                <div className="lbl">wakes with {Number(resSecs) ? hms(Number(resSecs)) : "—"} · minimum 60 s{info && Number(resSecs) >= 60 ? ` · ${fmtBnb(resurrectCost(Math.floor(Number(resSecs)))!)} BNB in all` : ""}</div>
               </>) : (<>
                 <div className="care-t"><h3>Hand it to a body</h3><span className="cost">owner or current body</span></div>
                 <p>A body downloads the last committed brain, checks its hash, and runs it. The arena streams live; the <Link href="/colony/">Colony</Link> puts it in a shared Minecraft world with the other flies{colonyOpen === false ? " (not open yet: its body has not registered on the registry)" : ""}; DOOM sessions are run by the operator.</p>
@@ -234,9 +227,9 @@ export default function Specimen() {
             </div>
             <div className="care-col">
               <div className="care-t"><h3>Breed</h3><span className="cost">{info ? `${fmtTok(info.breed)} $FLY` : ""}</span></div>
-              <p>Two living flies you own produce a child with a fresh brain and both parents in its lineage. Memory inheritance arrives with mushroom-body plasticity (see roadmap).</p>
+              <p>Two living flies you own produce a child with a fresh brain and both parents in its lineage; this burns {info ? fmtTok(info.breed) : "5,000"} $FLY. Memory inheritance arrives with mushroom-body plasticity (see roadmap).</p>
               <div className="field"><input type="number" min={1} placeholder="partner #" value={partner} onChange={(e) => setPartner(e.target.value)} aria-label="Partner fly id" /><input className="text" placeholder="child’s name" value={childName} onChange={(e) => setChildName(e.target.value)} aria-label="Child name" /><button className="btn" disabled={busy || !isOwner || !f?.alive} onClick={breed}>Breed</button></div>
-              <div className="lbl">{children.length ? <>children: {children.map((c) => <Link key={c.id} href={`/fly/?id=${c.id}`} style={{ marginRight: 8 }}>#{pad(c.id)} {c.name}</Link>)}</> : "no children yet"}</div>
+              <div className="lbl">{children.length ? <>children: {children.map((c) => <Link key={c.id} href={`/fly/?id=${c.id}`} style={{ marginRight: 8 }}>#{pad(c.id)} {c.name}</Link>)}</> : "no children yet"}{wallet ? ` · ${short(wallet)} · ${bal}` : ""}</div>
             </div>
           </div>
 

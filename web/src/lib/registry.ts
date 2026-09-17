@@ -6,7 +6,9 @@ export type FlyRecord = {
   parentA: number; parentB: number; stateRoot: string; memoryRoot: string; stateURI: string; brainStep: number; energy: number;
   bornBlock: number; lastCommitBlock: number; body: string; pendingBody: string; alive: boolean;
 };
-export type RegistryInfo = { total: number; max: number; mint: bigint; res: bigint; feed: bigint; breed: bigint; genesisEnergy: number; burned: bigint };
+/** The registry's numbers (v3): mint and breed in $FLY (burned), life in BNB (`lifeWeiPerSecond` per second of life,
+ *  `resurrectWei` flat to wake a dead fly, nothing burned), and `burned` the $FLY mints and breeding have sent to the dead address. */
+export type RegistryInfo = { total: number; max: number; mint: bigint; lifeWeiPerSecond: bigint; resurrectWei: bigint; breed: bigint; genesisEnergy: number; burned: bigint };
 export type Ev = { name: string; args: any; block: number; tx: string };
 
 export const ZERO = "0x0000000000000000000000000000000000000000";
@@ -20,8 +22,14 @@ export const dur = (s: number | bigint) => { let n = Math.max(0, Math.floor(Numb
 export const inBody = (addr: string, names: Record<string, string> = {}) => { if (!addr || addr === ZERO) return ""; const a = addr.toLowerCase(); return a === CFG.bodies.arena.toLowerCase() ? "in the arena" : a === CFG.bodies.colony.toLowerCase() ? "in the Colony" : `in ${bodyName(addr, names)}`; };
 /** BNB from wei, trimmed: "0.01", "0.0015", "1.2". */
 export const fmtBnb = (wei: bigint) => { try { return Number(ethers.formatEther(wei)).toLocaleString("en-US", { maximumFractionDigits: 6 }); } catch { return "0"; } };
-/** Two newest-first records (the registry's and the LifeFund's, say) as one, newest first; the first list's rows come first within a block. */
+/** Two newest-first records as one, newest first; the first list's rows come first within a block. */
 export const mergeEvents = (...lists: Ev[][]) => ([] as Ev[]).concat(...lists).sort((x, y) => y.block - x.block);
+/** Seconds of life `wei` buys at `rate` wei per second (the registry's lifeWeiPerSecond): floor(wei / rate), 0 when there is no price yet. */
+export const secondsFor = (wei: bigint, rate: bigint) => (rate > BigInt(0) ? Number(wei / rate) : 0);
+/** What `seconds` of life costs in wei at `rate`: the registry's own lifeCost(seconds) = seconds × lifeWeiPerSecond. */
+export const lifeCost = (seconds: number, rate: bigint) => BigInt(Math.max(0, Math.floor(seconds))) * rate;
+/** "0.01 BNB per day" at `rate`, for the price lines. */
+export const bnbPerDay = (rate: bigint) => fmtBnb(lifeCost(86400, rate));
 export const ipfs = (uri: string) => (uri && uri.startsWith("ipfs://") ? CFG.ipfsGateway + uri.slice(7) : uri);
 export const pad = (id: number) => String(id).padStart(3, "0");
 

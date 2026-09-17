@@ -44,7 +44,7 @@ TEST_BODY = os.environ.get('FLYHOST_TEST_BODY', '') if (REMOTE and os.environ.ge
 BODY_ADDR = os.environ.get('BODY_ADDR', '') if REMOTE else COLONY_ADDR
 STATE = os.environ.get('STATE') or os.path.join(HERE, f'state_{FLY_ID}' if REMOTE else (f'state_colony_{FLY_ID}' if COLONY else 'state')); SNAPS = os.environ.get('SNAPS') or os.path.join(HERE, 'snapshots')
 os.makedirs(STATE, exist_ok=True); os.makedirs(SNAPS, exist_ok=True)
-REGISTRY_DEPLOY_BLOCK = int(os.environ.get('REGISTRY_DEPLOY_BLOCK', '122001000'))
+REGISTRY_DEPLOY_BLOCK = int(os.environ.get('REGISTRY_DEPLOY_BLOCK', '122448689'))
 BODY_KEY = os.path.join(HERE, 'body_colony.key' if COLONY else 'body_arena.key')
 BODY_LABEL = 'Colony' if COLONY else 'Arena'; CAUSE = 'starved in the Colony' if COLONY else 'starved in the arena'
 RPC_LOGS = os.environ.get('RPC_LOGS', 'https://bsc-rpc.publicnode.com'); RPC_SEND = os.environ.get('RPC_SEND', 'https://bsc-dataseed.bnbchain.org')

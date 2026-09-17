@@ -5,7 +5,7 @@ import os, sys, time, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from registry import Registry, portrait, REGISTRY
 HERE = os.path.dirname(os.path.abspath(__file__)); STATE = os.path.join(HERE, 'state', 'curator.json')
-DEPLOY_BLOCK = int(os.environ.get('REGISTRY_DEPLOY_BLOCK', '122001000'))
+DEPLOY_BLOCK = int(os.environ.get('REGISTRY_DEPLOY_BLOCK', '122448689'))
 reg = Registry(key='0x' + open(os.path.join(HERE, '..', 'deploy.txt')).read().strip())
 st = json.load(open(STATE)) if os.path.exists(STATE) else {'done': [], 'block': DEPLOY_BLOCK}
 log = lambda *a: print(time.strftime('%H:%M:%S'), *a, flush=True)

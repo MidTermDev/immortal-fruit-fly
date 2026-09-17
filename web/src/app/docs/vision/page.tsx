@@ -38,7 +38,7 @@ export default function Page() {
         <li><strong>Real wiring only.</strong> Every neuron has a connectome root ID. No invented networks.</li>
         <li><strong>The chain is the only body.</strong> Anything that matters lives in storage. The website is a view.</li>
         <li><strong>Deterministic and replayable.</strong> Background noise is <code>keccak256(step)</code>, never block data. Any client recomputes the whole life from events, bit for bit. A Foundry test replays the real mainnet transactions.</li>
-        <li><strong>Everything it eats is gone.</strong> Feeding, stimulating and resurrecting send <code>$FLY</code> to the dead address. No faucets in the base protocol.</li>
+        <li><strong>Every birth is paid for.</strong> Minting, breeding and stimulating the on-chain core send <code>$FLY</code> to the dead address; life itself is a little BNB to the registry, nothing burned. No faucets in the base protocol.</li>
         <li><strong>Cheap enough to be alive.</strong> A 32-step tick costs about 7M gas, roughly 0.0003 BNB at BSC&apos;s 0.05 gwei. That is the whole reason this is possible on BNB Chain and not elsewhere.</li>
       </ol>
 

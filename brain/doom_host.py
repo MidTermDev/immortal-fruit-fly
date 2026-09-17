@@ -33,7 +33,7 @@ SCAN_EVERY = float(os.environ.get('DOOM_SCAN_EVERY', '30'))
 SESSION_MIN = float(os.environ.get('DOOM_SESSION_MIN', '5'))
 THREADS = os.environ.get('DOOM_THREADS', '12')          # the earlier sessions ran with 14; the arena and the pebble brains share the rest of the machine
 DRY = os.environ.get('DOOM_DRY') == '1'
-FROM_BLOCK = int(os.environ.get('DOOM_FROM_BLOCK', '122001000'))   # the registry's deploy block: Assigned events are scanned from here once, then incrementally
+FROM_BLOCK = int(os.environ.get('DOOM_FROM_BLOCK', '122448689'))   # the registry's deploy block: Assigned events are scanned from here once, then incrementally
 STOP_GRACE = float(os.environ.get('DOOM_STOP_GRACE', '120'))      # on SIGTERM, how long a running session may go on before it is terminated
 SESSION_EXTRA = float(os.environ.get('DOOM_SESSION_EXTRA', '900'))   # beyond the session minutes: brain start, IPFS fetch, final commit and pins
 RETRY_AFTER = float(os.environ.get('DOOM_RETRY_AFTER', '600')); MAX_FAILS = int(os.environ.get('DOOM_MAX_FAILS', '3'))

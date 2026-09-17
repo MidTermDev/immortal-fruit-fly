@@ -126,18 +126,17 @@ export function TokenSection() {
     <section className="sec" id="fly">
       <div className="wrap">
         <div className="sec-t">
-          <div><div className="num">$FLY</div><h2>A token because the animal needs a metabolism</h2></div>
-          <p>$FLY is a BEP-20 with a 1% transfer tax, no owner and no mint. Its purpose is to be destroyed to create and sustain life. Minting a fly, feeding it, resurrecting it and breeding two of them all send $FLY to the dead address, where it can never move again, and every burn is stored against the address that paid it. Circulating supply only falls, and it falls in proportion to how much anyone cares. (The token&apos;s 1% transfer tax applies to those transfers too; figures on this page are the amounts sent.)</p>
+          <div><div className="num">$FLY</div><h2>A token because the species needs to be born</h2></div>
+          <p>$FLY is a BEP-20 with a 1% transfer tax, no owner and no mint. Its purpose is to be destroyed to create life. Minting a fly and breeding two of them send $FLY to the dead address, where it can never move again, and every burn is stored against the address that paid it; so does poking the on-chain core. Keeping a fly alive costs a little BNB, about 0.01 per day, paid to the registry; nothing is burned for metabolism. Minting burns 1 $FLY, breeding 5,000. Circulating supply only falls, and it falls with every fly that is born. (The token&apos;s 1% transfer tax applies to those transfers too; figures on this page are the amounts sent.)</p>
         </div>
         <div className="cols3">
           <div>
             <h3 style={{ fontSize: 15, marginBottom: 8 }}>What it buys</h3>
             <table className="data" style={{ fontSize: 13 }}><tbody>
               <tr><td>1 $FLY</td><td className="num mono">a new fly (mint)</td></tr>
-              <tr><td>1 $FLY</td><td className="num mono">1 second of life (feed)</td></tr>
-              <tr><td>1,000 $FLY + food</td><td className="num mono">one resurrection</td></tr>
               <tr><td>5,000 $FLY</td><td className="num mono">one breeding</td></tr>
               <tr><td>100 $FLY</td><td className="num mono">1 stimulus to the on-chain core</td></tr>
+              <tr><td>0.01 BNB</td><td className="num mono">a day of life (nothing burned)</td></tr>
             </tbody></table>
           </div>
           <div>
@@ -151,7 +150,7 @@ export function TokenSection() {
           </div>
           <div>
             <h3 style={{ fontSize: 15, marginBottom: 8 }}>What the contracts cannot do</h3>
-            <p className="serif dim" style={{ fontSize: 14.5, lineHeight: 1.55 }}>FlyRegistry has no upgrade path and no pause. Nobody can move a fly&apos;s tokens, change prices, rewrite a brain state, or transfer a fly that is dead. Only the body running a fly may write to it, and only forward. The curator can set a dormant fly&apos;s portrait and the collection&apos;s branding, nothing else. FlyBrain, the on-chain core, has no owner at all.</p>
+            <p className="serif dim" style={{ fontSize: 14.5, lineHeight: 1.55 }}>FlyRegistry has no upgrade path and no pause. Nobody can move a fly&apos;s tokens, rewrite a brain state, or transfer a fly that is dead. Only the body running a fly may write to it, and only forward. The curator can set a dormant fly&apos;s portrait, the collection&apos;s branding and the BNB price of life as BNB moves, nothing else; the $FLY prices are fixed. FlyBrain, the on-chain core, has no owner at all.</p>
             <p style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}><a className="btn sm" href={CFG.links.pancake + CFG.token} target="_blank" rel="noopener">Get $FLY</a><a className="btn sm plain" href="/flies/">Mint a fly →</a></p>
           </div>
         </div>

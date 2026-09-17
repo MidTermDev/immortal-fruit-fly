@@ -8,7 +8,8 @@ warnings.filterwarnings('ignore', message='.*MismatchedABI.*')
 from web3 import Web3
 
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.join(HERE, '..')
-REGISTRY = os.environ.get('FLYREGISTRY', '0x0eeB0A675720306Ef6f426Bd8560c1288848f813')
+REGISTRY = os.environ.get('FLYREGISTRY', '0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53')   # FlyRegistry v3 (life in BNB); v2 0x0eeB0A67…f813 is history
+REGISTRY_V2 = '0x0eeB0A675720306Ef6f426Bd8560c1288848f813'
 TOKEN = '0x23791aa3b031659b593cf141a2bc76b0ad657777'
 RPC = os.environ.get('RPC_URL') or (open(os.path.join(HERE, 'rpc.txt')).read().strip() if os.path.exists(os.path.join(HERE, 'rpc.txt')) else 'https://bsc-dataseed.bnbchain.org')
 SITE = "https://www.immortalfly.app"   # the site (Vercel); the GitHub Pages mirror is midtermdev.github.io/immortal-fruit-fly
@@ -112,8 +113,11 @@ class Registry:
     def accept(self, fid): return self.send(self.c.functions.accept, fid)
     def release(self, fid): return self.send(self.c.functions.release, fid)
     def mint(self, name): self.ensure_allowance(10 ** 18); rc = self.send(self.c.functions.mint, name, gas=400_000); return self.c.events.Minted().process_receipt(rc)[0]['args']['id']
-    def feed(self, fid, seconds): self.ensure_allowance(seconds * 10 ** 18); return self.send(self.c.functions.feed, fid, seconds)
-    def resurrect(self, fid, seconds): self.ensure_allowance((1000 + seconds) * 10 ** 18); return self.send(self.c.functions.resurrect, fid, seconds)
+    # v3: life is paid in BNB (nothing burned); the registry's keeper pays nothing, anyone else sends lifeCost(seconds)
+    def life_cost(self, seconds): return self.c.functions.lifeCost(int(seconds)).call()
+    def is_keeper(self): return self.address and self.c.functions.keeper().call().lower() == self.address.lower()
+    def feed(self, fid, seconds): return self.send(self.c.functions.feed, fid, seconds, value=0 if self.is_keeper() else self.life_cost(seconds), gas=150_000)
+    def resurrect(self, fid, seconds): return self.send(self.c.functions.resurrect, fid, seconds, value=0 if self.is_keeper() else self.c.functions.resurrectWei().call() + self.life_cost(seconds), gas=200_000)
     def commit(self, fid, state_root, memory_root, state_uri, metadata_uri, step, energy, history_root):
         return self.send(self.c.functions.commit, fid, bytes.fromhex(state_root), bytes.fromhex(memory_root), state_uri, metadata_uri, int(step), int(energy), bytes.fromhex(history_root))
     def interaction(self, fid, kind, data): return self.send(self.c.functions.interaction, fid, kind.encode().ljust(32, b'\0')[:32], data[:512], gas=120_000)

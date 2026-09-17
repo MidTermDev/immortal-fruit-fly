@@ -8,7 +8,7 @@ export default function Page() {
   return (
     <DocsShell current="/docs/how-it-works/">
       <h1>How it works</h1>
-      <p className="lede">Two brains. The whole connectome runs on a server in the published whole-brain model, embodied in a world, and is anchored to BNB Smart Chain by hashes and fed by burns. A 155-neuron core runs entirely inside a contract. This page covers both.</p>
+      <p className="lede">Two brains. The whole connectome runs on a server in the published whole-brain model, embodied in a world, and is anchored to BNB Smart Chain by hashes and fed for a little BNB. A 155-neuron core runs entirely inside a contract. This page covers both.</p>
 
       <h2>Part 1 · The whole brain</h2>
       <h3>The model</h3>

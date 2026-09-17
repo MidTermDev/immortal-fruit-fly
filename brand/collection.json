@@ -1,10 +1,10 @@
 {
  "name": "Immortal Fruit Flies",
- "description": "Living fruit-fly brains on BNB Smart Chain. Each fly runs all 139,248 neurons of the FlyWire connectome in the published whole-brain model. Its brain state, memory, lineage and interaction history are committed to the FlyRegistry by whichever body is running it: an arena where it smells its way to food, DOOM where its escape reflex pulls the trigger, and any body anyone builds. It starves if nobody feeds it; a dead fly's brain is preserved on-chain and cannot be sold until someone resurrects it. Minting (1 $FLY), feeding, resurrecting and breeding burn $FLY. 10,000 flies at most.",
+ "description": "Living fruit-fly brains on BNB Smart Chain. Each fly runs all 139,248 neurons of the FlyWire connectome in the published whole-brain model. Its brain state, memory, lineage and interaction history are committed to the FlyRegistry by whichever body is running it: an arena where it smells its way to food, DOOM where its escape reflex pulls the trigger, and any body anyone builds. It starves if nobody feeds it; a dead fly's brain is preserved on-chain and cannot be sold until someone resurrects it. Minting burns 1 $FLY and breeding 5,000; keeping a fly alive costs a little BNB (about 0.01 per day) and burns nothing. 10,000 flies at most. This is registry v3; v2 (0x0eeB\u2026f813) is history: every fly moved here with the same id and owner.",
  "image": "ipfs://QmW6hnaa3vvRPnvyGJTWwBSygn3dWMTosLgC8TXWR9gAGy",
  "banner_image": "ipfs://QmNSCC7SjCZsRbwcAmKzXJSaCU5Rxb6rL3gE5g3pk8zt2Y",
  "featured_image": "ipfs://QmehNWLpwjEVjsTKiT9G3MhjUNSgbNiThoMW6Q1Xm72K9z",
- "external_link": "https://midtermdev.github.io/immortal-fruit-fly/",
+ "external_link": "https://www.immortalfly.app/",
  "seller_fee_basis_points": 250,
  "fee_recipient": "0xA2eD0B7da1C7b5ee1af819CA281F4894B1700e27",
  "collaborators": []

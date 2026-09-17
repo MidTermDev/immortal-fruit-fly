@@ -4,7 +4,7 @@
 import { createRequire } from 'module';
 const require = createRequire(new URL('../web/package.json', import.meta.url));
 const { chromium } = require('playwright');
-const REGISTRY = '0x0eeB0A675720306Ef6f426Bd8560c1288848f813';
+const REGISTRY = '0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53';
 const ids = process.argv.slice(2);
 if (!ids.length) { console.error('usage: market_refresh.mjs <id>...'); process.exit(2); }
 const b = await chromium.launch();

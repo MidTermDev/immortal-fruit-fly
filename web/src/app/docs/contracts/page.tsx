@@ -10,9 +10,9 @@ export default function Page() {
       <h1>Contracts &amp; addresses</h1>
       <p className="lede">Everything is on BNB Smart Chain (chain ID 56). Sources are verified on BscScan and on Sourcify as exact matches.</p>
       <table className="data"><thead><tr><th>Contract</th><th>Address</th></tr></thead><tbody>
-        <tr><td><code>FlyRegistry</code>, the organism: ERC-721 “Immortal Fruit Flies” (FLYS), identity, brain state, memory, lineage, history</td><td><a href={`${ex}/address/${CFG.registry}#code`}>{CFG.registry}</a> · <a href={CFG.market.collection}>Element</a></td></tr>
-        <tr><td><code>FlyCore</code>, every fly&apos;s on-chain compass core (155 FlyWire neurons in the EVM, keyed by token id; pebbles anchor here)</td><td><a href={`${ex}/address/${CFG.core}#code`}>{CFG.core}</a></td></tr>
-        <tr><td><code>LifeFund</code>, keep a fly alive for a little BNB: credits seconds of life, the operator&apos;s keeper feeds the fly from the fund&apos;s $FLY</td><td><a href={`${ex}/address/${CFG.lifeFund}#code`}>{CFG.lifeFund}</a></td></tr>
+        <tr><td><code>FlyRegistryV3</code>, the organism: ERC-721 “Immortal Fruit Flies” (FLYS), identity, brain state, memory, lineage, history; life paid in BNB</td><td><a href={`${ex}/address/${CFG.registry}#code`}>{CFG.registry}</a> · <a href={CFG.market.collection}>Element</a></td></tr>
+        <tr><td><code>FlyCore</code>, every fly&apos;s on-chain compass core (155 FlyWire neurons in the EVM, keyed by token id; pebbles anchor here), redeployed against v3</td><td><a href={`${ex}/address/${CFG.core}#code`}>{CFG.core}</a></td></tr>
+        <tr><td><code>FlyRegistry</code> v2, the previous registry: the same flies until the migration; their record up to then is on it (history)</td><td><a href={`${ex}/address/${CFG.registryV2}#code`}>{CFG.registryV2}</a></td></tr>
         <tr><td>Arena body (streams the live fly)</td><td><a href={`${ex}/address/${CFG.bodies.arena}`}>{CFG.bodies.arena}</a></td></tr>
         <tr><td>DOOM body</td><td><a href={`${ex}/address/${CFG.bodies.doom}`}>{CFG.bodies.doom}</a></td></tr>
         <tr><td><code>$FLY</code> token</td><td><a href={`${ex}/token/${CFG.token}`}>{CFG.token}</a></td></tr>
@@ -23,6 +23,7 @@ export default function Page() {
         <tr><td><code>FlyBrain</code> v1 (first fly, retired)</td><td><a href={`${ex}/address/${CFG.brainV1}`}>{CFG.brainV1}</a> · <a href={CFG.links.sourcify + CFG.brainV1}>source</a></td></tr>
         <tr><td>Keeper / deployer</td><td><a href={`${ex}/address/${CFG.deployer}`}>{CFG.deployer}</a></td></tr>
       </tbody></table>
+      <div className="callout" id="v3"><b>Registry v3.</b> <code>FlyRegistryV3</code> at <code>{CFG.registry}</code> replaced the v2 registry on 17 September 2026. What changed: <b>life is paid in BNB, nothing is burned as metabolism</b>. <code>feed(id, seconds)</code> and <code>resurrect(id, seconds)</code> are payable: a feed costs <code>lifeCost(seconds)</code> = seconds × <code>lifeWeiPerSecond</code> (today 0.01 BNB per day of life), a resurrection <code>resurrectWei</code> (0.002 BNB) plus the life it wakes with; the BNB goes to the treasury, and the curator adjusts both prices as BNB moves (<code>LifePriceSet</code>). The <code>keeper</code> (the operator) feeds for free, so the operator can keep flies alive. Minting still burns 1 $FLY and breeding 5,000; the <code>LifeFund</code> that fed v2 with $FLY is retired. <b>Migration:</b> every fly of v2 was re-created on v3 with the same id, the same owner and its whole record (brain state, memory, lineage, energy, generation, deaths), one <code>Migrated(id, to, previousRegistry)</code> event each, after which <code>closeMigration()</code> ends it for ever; bodies re-registered and were re-assigned. The <a href={`${ex}/address/${CFG.registryV2}#code`}>old registry</a> stays on-chain as history: its record of every fly up to the migration is still readable there, and <code>previousRegistry()</code> on v3 points at it.</div>
       <div className="callout"><b>v1 → v2.</b> The first fly dropped pending synaptic input at the end of each tick, so a bump could not survive between ticks. v2 keeps it in storage, has a Yul inner loop (about 2.3× cheaper), and parameters calibrated across several trajectories. v1 stays on-chain as the first organism; its lineage is a fossil.</div>
       <h2>FlyRegistry interface</h2>
       <p>One contract is the permanent layer. A fly is a token; everything about it lives here or is anchored here. Bodies (an arena, a game, a robot) register, get assigned a fly, accept it, and are then the only address that can write its brain state, and only forward.</p>
@@ -31,9 +32,12 @@ export default function Page() {
              uint64 bornBlock; uint64 lastCommitBlock; address body; address pendingBody; bool alive; }
 
 function mint(string name) returns (uint256 id);               // anyone; burns MINT_PRICE (1 FLY); fresh genesis brain; max 10,000
-function feed(uint256 id, uint64 seconds_);                    // anyone; burns seconds × FEED_PER_SECOND (1 FLY/s)
-function resurrect(uint256 id, uint64 seconds_);               // anyone; only when dead; burns RESURRECT_PRICE (1,000) + food; generation + 1
+function feed(uint256 id, uint64 seconds_) payable;            // anyone; msg.value >= lifeCost(seconds_) in BNB; nothing burned; the keeper pays nothing
+function resurrect(uint256 id, uint64 seconds_) payable;       // anyone; only when dead; msg.value >= resurrectWei + lifeCost(seconds_); generation + 1
 function breed(uint256 a, uint256 b, bytes32 childMemoryRoot, string name) returns (uint256 id); // owner of both, both alive; burns 5,000
+function lifeCost(uint64 seconds_) view returns (uint256);     // seconds_ × lifeWeiPerSecond
+function lifeWeiPerSecond() view returns (uint256); function resurrectWei() view returns (uint256); function keeper() view returns (address);
+function previousRegistry() view returns (address); function migrationOpen() view returns (bool);
 function registerBody(string name, string uri);                // anyone; a body announces itself (the arena puts its live-stream URL here)
 function assign(uint256 id, address body);                     // the owner, or the body currently running it
 function accept(uint256 id); function release(uint256 id);     // the body
@@ -44,39 +48,27 @@ function attest(uint256 id, uint64 brainStep, bytes32 stateRoot); // anyone who 
 function setMetadata(uint256 id, string uri);                   // curator, only while no body runs the fly (portraits)
 
 event Minted(uint256 indexed id, address indexed to, string name, uint256 parentA, uint256 parentB);
-event Fed(uint256 indexed id, address indexed by, uint64 seconds_, uint256 tokensBurned);
-event Resurrected(uint256 indexed id, address indexed by, uint32 generation, uint64 energy, uint256 tokensBurned);
+event Fed(uint256 indexed id, address indexed by, uint64 seconds_, uint256 paidWei);
+event Resurrected(uint256 indexed id, address indexed by, uint32 generation, uint64 energy, uint256 paidWei);
+event LifePriceSet(uint256 lifeWeiPerSecond, uint256 resurrectWei);
+event Migrated(uint256 indexed id, address indexed to, address previousRegistry);
 event Assigned / Accepted / Released (uint256 indexed id, address indexed body …);
 event Commit(uint256 indexed id, address indexed body, bytes32 stateRoot, bytes32 memoryRoot, string stateURI, uint64 brainStep, uint64 energy, bytes32 historyRoot);
 event Interaction(uint256 indexed id, address indexed body, bytes32 indexed kind, string data);
 event Died(uint256 indexed id, address indexed body, uint32 generation, bytes32 stateRoot, bytes32 memoryRoot, string stateURI, uint64 brainStep, string cause);
 event Attested(uint256 indexed id, address indexed attestor, uint64 brainStep, bytes32 stateRoot, bool matches);`}</code></pre>
-      <p>Rules the contract enforces: a fly has at most one body; only that body commits, and only forward; a dead fly cannot be committed and <b>cannot be transferred or sold</b> until resurrected; breeding needs two living flies; supply stops at 10,000. Snapshots are pinned to IPFS and named by their sha256, which is the <code>stateRoot</code>, so any body can fetch, verify and continue a fly. ERC-2981 royalty: 2.5% to the operator on secondary sales. Nothing is upgradeable; the curator can only set dormant flies&apos; portraits and the collection&apos;s branding.</p>
-      <h2>LifeFund</h2>
-      <p>Feeding is the organism&apos;s metabolism and stays as it is: one $FLY burned per second of life. But most people should not have to hold $FLY to keep a fly alive, so a second contract, <a href={`${ex}/address/${CFG.lifeFund}#code`}><code>LifeFund</code></a> (verified), takes BNB instead. Anyone calls <code>sponsor(id)</code> with BNB for any fly; the fly is credited with <code>quote(msg.value)</code> seconds of life at the published rate (<code>secondsPerWeiE18</code>, set so that 0.01 BNB is 86,400 s: a day). The operator&apos;s keeper then calls <code>keep(id, seconds)</code> whenever the fly is running in a body and getting hungry, which spends the credit and feeds the registry from the $FLY the fund holds. The keeper may also <code>grant(id, seconds)</code> free life, at most <code>freeSecondsPerDay</code> (7,200 s, two hours) per fly per day. The BNB goes to the treasury, the operator refills the fund&apos;s $FLY, and nothing in the contract can touch anyone&apos;s fly: it can only feed.</p>
-      <pre><code>{`function sponsor(uint256 id) payable;                         // anyone, for any fly; credit[id] += quote(msg.value); the BNB goes to the treasury
-function quote(uint256 wei_) view returns (uint256 seconds_);  // wei × secondsPerWeiE18 / 1e18
-function keep(uint256 id, uint64 seconds_);                    // keeper: credit[id] -= seconds; registry.feed(id, seconds) from the fund's $FLY
-function grant(uint256 id, uint64 seconds_);                   // keeper: a free top-up, capped at freeSecondsPerDay per fly per day
-
-function credit(uint256 id) view returns (uint256);            // sponsored seconds not yet fed (never expire)
-function sponsoredTotal(uint256 id) view returns (uint256);    // wei ever sent for the fly
-function fedTotal(uint256 id) view returns (uint256);          // seconds the fund has ever fed it, sponsored and free
-function freeLeftToday(uint256 id) view returns (uint256);     // free seconds the operator can still grant it today
-function stockSeconds() view returns (uint256);                // the fund's $FLY, in seconds of life it can still pay for
-
-event Sponsored(uint256 indexed id, address indexed by, uint256 wei_, uint256 seconds_, uint256 credit);
-event Kept(uint256 indexed id, uint64 seconds_, uint256 creditLeft);
-event Granted(uint256 indexed id, uint64 seconds_);`}</code></pre>
+      <p>Rules the contract enforces: a fly has at most one body; only that body commits, and only forward; a dead fly cannot be committed and <b>cannot be transferred or sold</b> until resurrected; breeding needs two living flies; supply stops at 10,000. Snapshots are pinned to IPFS and named by their sha256, which is the <code>stateRoot</code>, so any body can fetch, verify and continue a fly. ERC-2981 royalty: 2.5% to the operator on secondary sales. Nothing is upgradeable; the curator can only set dormant flies&apos; portraits, the collection&apos;s branding, the BNB price of life and the keeper.</p>
+      <h2>Life in BNB</h2>
+      <p>Feeding is the organism&apos;s metabolism, and on v3 it is paid in BNB to the registry itself: anyone calls <code>feed(id, seconds)</code> with at least <code>lifeCost(seconds)</code> for any fly, and the fly&apos;s <code>energy</code> rises by that many seconds at once (its body applies it at the next poll, as food). Waking a dead fly is <code>resurrect(id, seconds)</code> with <code>resurrectWei + lifeCost(seconds)</code>. Nothing is burned; every wei goes to the treasury, and the site shows the price it read before it pays. The keeper address pays nothing, so the operator can keep flies alive out of its own pocket; every <code>Fed</code> and <code>Resurrected</code> event carries what was paid.</p>
       <table className="data"><tbody>
-        <tr><td>Rate</td><td>0.01 BNB ≈ 24 h of life (<code>secondsPerWeiE18</code> = 8,640,000); the owner can change it, and every page quotes the live rate</td></tr>
+        <tr><td>Price</td><td><code>lifeWeiPerSecond</code> = 115,740,740,740 wei: 0.01 BNB ≈ 24 h of life; the curator can change it (<code>setLifePrice</code>, event <code>LifePriceSet</code>), and every page reads the live price</td></tr>
+        <tr><td>Resurrection</td><td><code>resurrectWei</code> = 0.002 BNB, plus at least 60 s of life</td></tr>
         <tr><td>Minimum</td><td>anything that buys at least one second (<code>TooLittle</code> otherwise); the site suggests 0.001 BNB or more</td></tr>
-        <tr><td>Free allowance</td><td><code>freeSecondsPerDay</code> = 7,200 s per fly per day, granted by the keeper</td></tr>
-        <tr><td>Keeper</td><td>the operator&apos;s keeper wallet; feeds a sponsored fly only while it runs in a body (a fly that is not running does not age)</td></tr>
+        <tr><td>Keeper</td><td>the operator; feeds for free while a fly runs in a body (a fly that is not running does not age)</td></tr>
       </tbody></table>
       <h2>Constants of the registry</h2>
       <table className="data"><tbody>
-        <tr><td>MINT_PRICE</td><td>1 FLY</td></tr><tr><td>FEED_PER_SECOND</td><td>1 FLY</td></tr><tr><td>RESURRECT_PRICE</td><td>1,000 FLY (+ at least 60 s of food)</td></tr><tr><td>BREED_PRICE</td><td>5,000 FLY</td></tr><tr><td>GENESIS_ENERGY</td><td>3,600 s</td></tr><tr><td>MAX_SUPPLY</td><td>10,000</td></tr><tr><td>CONNECTOME</td><td>sha256 of the FlyWire 783 connectome build (see <code>brain/identity.json</code>)</td></tr><tr><td>MODEL</td><td>2 (Shiu et al. 2024 parameters, <code>brain/sim.py</code>)</td></tr>
+        <tr><td>MINT_PRICE</td><td>1 FLY, burned</td></tr><tr><td>BREED_PRICE</td><td>5,000 FLY, burned</td></tr><tr><td>lifeWeiPerSecond</td><td>0.01 BNB per day of life (adjustable)</td></tr><tr><td>resurrectWei</td><td>0.002 BNB (+ at least 60 s of life, adjustable)</td></tr><tr><td>GENESIS_ENERGY</td><td>3,600 s</td></tr><tr><td>MAX_SUPPLY</td><td>10,000</td></tr><tr><td>CONNECTOME</td><td>sha256 of the FlyWire 783 connectome build (see <code>brain/identity.json</code>)</td></tr><tr><td>MODEL</td><td>2 (Shiu et al. 2024 parameters, <code>brain/sim.py</code>)</td></tr>
       </tbody></table>
       <h2>$FLY</h2>
       <p>A BEP-20 with 1,000,000,000 supply, 18 decimals and a 1% transfer tax; ownership renounced; EIP-2612 permit. It has no burn function, so the fly “burns” by transferring to <code>0x000000000000000000000000000000000000dEaD</code>. <code>FlyBrain.totalBurned()</code> counts what the fly has eaten.</p>

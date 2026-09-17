@@ -41,7 +41,7 @@ Scientists mapped every neuron and synapse in a fruit fly's brain. People put th
 
 Siyuan's reply to that (quoted by CZ: *"immortal fruit flies on BNB Chain"*) named what a chain could actually hold: **identity, brain state, memory, lineage, interaction history**, so that a fly could die in a game and be instantiated again. This repository is that, built literally:
 
-- **`FlyRegistry`** ([`0x0eeB…f813`](https://bscscan.com/address/0x0eeB0A675720306Ef6f426Bd8560c1288848f813#code)) is the organism. An ERC-721 where every token is a fly: the sha256 of the connectome it runs, the model version, the sha256 of its complete brain state and where the bytes are (IPFS), its memory root, energy, generation, deaths, parents, and which **body** is running it. At most 10,000.
+- **`FlyRegistry`** (v3, [`0x69DA…b53`](https://bscscan.com/address/0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53#code)) is the organism. An ERC-721 where every token is a fly: the sha256 of the connectome it runs, the model version, the sha256 of its complete brain state and where the bytes are (IPFS), its memory root, energy, generation, deaths, parents, and which **body** is running it. At most 10,000.
 - **Bodies** are programs that speak the registry protocol: download a fly's last committed brain, verify the hash, run it, commit new state and history as it goes, report its death. Two exist: the **arena** (`brain/server.py`: odor plumes, food, a looming predator, streamed live) and **DOOM** (`brain/doom.py`). Anyone can register another.
 - **The brain** is the whole FlyWire connectome, **139,248 neurons**, as spiking neurons in the published whole-brain model (Shiu et al. 2024), at real time on a CPU, deterministic to the bit (`brain/sim.py`, `brain/verify.py`).
 - **The on-chain core** (`FlyBrain.sol`, [`0xee80…17c5`](https://bscscan.com/address/0xee80f8cB5309C572343c38b5D717283BBBb517c5)): 155 real compass neurons (EPG, PEG, PEN, Δ7) executing entirely inside the EVM, with energy, death, resurrection and an engram. The part of a fly's neural behaviour that runs on-chain, not just a hash of it.
@@ -52,30 +52,33 @@ Siyuan's reply to that (quoted by CZ: *"immortal fruit flies on BNB Chain"*) nam
 
 | | |
 |---|---|
-| Contract | `FlyRegistry` · [`0x0eeB0A675720306Ef6f426Bd8560c1288848f813`](https://bscscan.com/address/0x0eeB0A675720306Ef6f426Bd8560c1288848f813#code) (verified) |
+| Contract | `FlyRegistryV3` · [`0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53`](https://bscscan.com/address/0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53#code) (verified; `contracts/src/FlyRegistryV3.sol`) |
 | Name · symbol | Immortal Fruit Flies · `FLYS` |
 | Supply | at most 10,000 |
 | Mint | `mint(name)` · burns **1 $FLY** · a fresh genesis brain with 3,600 s of life banked |
-| Feed | `feed(id, seconds)` · burns **1 $FLY per second** · anyone may feed any fly |
-| Resurrect | `resurrect(id, seconds)` · burns **1,000 $FLY** + food · the same brain continues, generation + 1 |
+| Keep alive | `feed(id, seconds)`, payable · **a little BNB, about 0.01 per day** (`lifeCost(seconds)` = seconds × `lifeWeiPerSecond`) · nothing burned · anyone may feed any fly; the keeper (the operator) feeds free |
+| Resurrect | `resurrect(id, seconds)`, payable · **0.002 BNB** (`resurrectWei`) + the life it wakes with, in BNB · the same brain continues, generation + 1 |
 | Breed | `breed(a, b, …, name)` · both alive, both yours · burns **5,000 $FLY** |
 | Dead flies | **cannot be transferred or sold** until resurrected (`DeadCannotTransfer`) |
 | Bodies | `registerBody`, `assign` (owner or current body), `accept`, `commit` (forward only), `interaction`, `died`, `release` |
 | Royalty | ERC-2981, 2.5% |
 | Metadata | per-fly JSON + portrait on IPFS, refreshed by the body at every commit (status, energy, brain step, body, lineage); collection `contractURI` on IPFS |
-| Marketplace | Element (the NFT marketplace that indexes BNB Chain; OpenSea does not list BSC): https://element.market/collections/immortal-fruit-flies-1 · fly #1: https://element.market/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813/1 |
+| Marketplace | Element (the NFT marketplace that indexes BNB Chain; OpenSea does not list BSC): fly #1 on v3: https://element.market/assets/bsc/0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53/1 (the v3 collection page's slug is set once Element has indexed the contract; the v2 collection was https://element.market/collections/immortal-fruit-flies-1) |
 
-Keeping a fly alive costs a little BNB. Feeding is the metabolism and stays as it is (1 $FLY burned per second of life), but nobody should have to hold $FLY for that, so `LifeFund` ([`0xB0e5Bf6c12207C7AFbB2A8f794809E3f072d93F3`](https://bscscan.com/address/0xB0e5Bf6c12207C7AFbB2A8f794809E3f072d93F3#code), verified; `contracts/src/LifeFund.sol`) takes BNB instead: anyone calls `sponsor(id)` with BNB for any fly, the fly is credited with seconds of life at the published rate (0.01 BNB ≈ 24 h), and the operator's keeper (`brain/lifekeeper.py`) spends that credit by feeding the fly from the fund's own $FLY whenever it is running in a body and getting hungry. The keeper also grants every fly up to two hours of free life a day. A fly that is not running does not age, so the credit waits; the BNB goes to the treasury, the operator refills the fund's $FLY, and the contract can do nothing to a fly but feed it. Every fly's page has a "Keep it alive" column, and the sponsorships, keeps and grants are in its record.
+Keeping a fly alive costs a little BNB, about 0.01 per day; nothing is burned for metabolism. Minting burns 1 $FLY, breeding 5,000. On registry v3 life is paid to the registry itself: `feed(id, seconds)` and `resurrect(id, seconds)` are payable, the BNB goes to the treasury, the curator adjusts `lifeWeiPerSecond` and `resurrectWei` as BNB moves (`LifePriceSet`), and the keeper (the operator) pays nothing so it can keep flies alive. Every fly's page has a "Keep it alive" column (amount in BNB → seconds of life → one payable call; the energy lands on the record at once), and every `Fed` and `Resurrected` event carries the wei paid.
+
+**Registry v3 and the migration (17 September 2026).** v2 ([`0x0eeB0A675720306Ef6f426Bd8560c1288848f813`](https://bscscan.com/address/0x0eeB0A675720306Ef6f426Bd8560c1288848f813#code)) burned $FLY as metabolism and was fed for BNB through a `LifeFund` contract; both are retired. Every fly of v2 was re-created on v3 with the same id, the same owner and its whole record (brain state, memory, lineage, energy, generation, deaths), one `Migrated(id, to, previousRegistry)` event each (`brain/migrate_v3.py`), after which `closeMigration()` ends it for ever; bodies re-registered and were re-assigned. The old registry stays on-chain as history: `previousRegistry()` on v3 points at it and every fly's record up to the migration is readable there. `FlyCore` was redeployed against v3 (same code).
 
 ## Live on BNB Smart Chain
 
 | | Address |
 |---|---|
-| `FlyRegistry` (the organism, the collection) | [`0x0eeB0A675720306Ef6f426Bd8560c1288848f813`](https://bscscan.com/address/0x0eeB0A675720306Ef6f426Bd8560c1288848f813) |
+| `FlyRegistryV3` (the organism, the collection; life in BNB) | [`0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53`](https://bscscan.com/address/0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53) |
+| `FlyRegistry` v2 (the previous registry; history up to the migration) | [`0x0eeB0A675720306Ef6f426Bd8560c1288848f813`](https://bscscan.com/address/0x0eeB0A675720306Ef6f426Bd8560c1288848f813) |
 | Arena body | [`0x47005543c06246124480D196a275327325695BEd`](https://bscscan.com/address/0x47005543c06246124480D196a275327325695BEd) |
 | DOOM body | [`0x642ebC7fD62a24406d8A86885F0131472E641c86`](https://bscscan.com/address/0x642ebC7fD62a24406d8A86885F0131472E641c86) |
 | `$FLY` token | [`0x23791aa3b031659b593cf141a2bc76b0ad657777`](https://bscscan.com/token/0x23791aa3b031659b593cf141a2bc76b0ad657777) |
-| `FlyCore` (every fly's on-chain compass core, keyed by token id; pebbles anchor here) | [`0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3`](https://bscscan.com/address/0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3) |
+| `FlyCore` (every fly's on-chain compass core, keyed by token id; pebbles anchor here; redeployed against v3) | [`0x77F6066B2ab12072DCEFb7D9DB998944C4ec28C2`](https://bscscan.com/address/0x77F6066B2ab12072DCEFb7D9DB998944C4ec28C2) |
 | `FlyBrain` v2 (the first on-chain compass core, fly #1's until it was seeded into FlyCore) | [`0xee80f8cB5309C572343c38b5D717283BBBb517c5`](https://bscscan.com/address/0xee80f8cB5309C572343c38b5D717283BBBb517c5) |
 | circuit table v2 (SSTORE2 data contract) | [`0x2eE3C5168CD3F60E87693716E660470011EA9C7e`](https://bscscan.com/address/0x2eE3C5168CD3F60E87693716E660470011EA9C7e) |
 | `FlyWorld` (fly #1's arena before the registry; read-only history) | [`0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4`](https://bscscan.com/address/0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4) |
@@ -135,7 +138,7 @@ Five handheld devices (M5Stack CoreS3), each a wallet that owns a fly and the **
 
 ## Token
 
-`$FLY` is the BEP-20 at the address above (1,000,000,000 supply, 18 decimals, 1% transfer tax, ownership renounced, EIP-2612 permit). Everything that creates or sustains life burns it: mint, feed, resurrect, breed, stimulate. Burned tokens go to `0x…dEaD`; nothing can move them again. Total supply only goes down.
+`$FLY` is the BEP-20 at the address above (1,000,000,000 supply, 18 decimals, 1% transfer tax, ownership renounced, EIP-2612 permit). Everything that creates life burns it: mint (1 $FLY), breed (5,000), and a stimulus to the on-chain core (100 per unit strength). Keeping a fly alive costs a little BNB, about 0.01 per day, and so does resurrecting one; nothing is burned for metabolism. Burned tokens go to `0x…dEaD`; nothing can move them again. Total supply only goes down.
 
 ## Repo
 

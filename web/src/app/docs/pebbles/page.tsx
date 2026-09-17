@@ -50,7 +50,7 @@ export default function Page() {
           <span><i>FlyCore</i> · per-fly 155 neurons in the EVM</span>
           <span>stimulate(id, …) / tick(id, n)</span>
           <span>state: v[155], bias, hist, head, step</span>
-          <span><i>$FLY</i> · mint, feed, resurrect burn it</span>
+          <span><i>$FLY</i> · mint and breed burn it; life is BNB</span>
         </div>
       </div>
       <p className="arch-cap">Figure | A pebble is a body: it speaks the registry protocol and runs the fly&apos;s on-chain core. The chain is the only authority.</p>

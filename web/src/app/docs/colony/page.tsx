@@ -39,7 +39,7 @@ export default function Page() {
       <h2>Life, energy, death</h2>
       <ul>
         <li><strong>Being in the Colony costs 1 s of life per second</strong>, from the fly&apos;s on-chain energy (the body commits <code>energy</code> every checkpoint).</li>
-        <li><strong><code>feed(id, seconds)</code></strong> on the registry drops that many food points near the fly in the world (bread, 5 s each), as the arena drops food. The fly has to smell its way there and eat.</li>
+        <li><strong><code>feed(id, seconds)</code></strong> on the registry (payable: a little BNB, about 0.01 a day; nothing burned) drops that many food points near the fly in the world (bread, 5 s each), as the arena drops food. The fly has to smell its way there and eat.</li>
         <li><strong>A zombie hit costs 60 s</strong> (the arena&apos;s rule) and knocks the bot; the bot never fights back (flies don&apos;t).</li>
         <li><strong>Energy 0 → <code>died(id, …, &quot;starved in the Colony&quot;)</code></strong>, the bot leaves the world; resurrect on the site and assign again.</li>
         <li><strong>Capacity:</strong> <code>COLONY_MAX_FLIES</code> at once (default 6; each whole brain gets <code>28 // n</code> threads; the frame carries <code>realtime</code> so the speed is always shown honestly). Beyond that, assigned flies wait in a queue and the site says so.</li>

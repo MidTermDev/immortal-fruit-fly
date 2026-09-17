@@ -2,9 +2,9 @@
 #pragma once
 #include <stdint.h>
 #define CHAIN_ID 56
-#define FLY_REGISTRY "0x0eeB0A675720306Ef6f426Bd8560c1288848f813"
+#define FLY_REGISTRY "0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53"   // FlyRegistry v3 (life in BNB, nothing burned); v2 0x0eeB…f813 is history
 #define FLY_TOKEN    "0x23791aa3b031659b593cf141a2bc76b0ad657777"
-#define FLY_CORE     "0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3"   // FlyCore on BSC mainnet (block 122089807), verified
+#define FLY_CORE     "0x77F6066B2ab12072DCEFb7D9DB998944C4ec28C2"   // FlyCore for v3 (block 122449461), verified
 #define FLY_HOST_ADDR "0x4fC3E7D1fAD1A8E7FAC849DAa5BfF0C8333fe2a6"  // the brain host body: bodies(FLY_HOST_ADDR).uri is its public origin (brain/HOST_PROTOCOL.md)
 #define SITE_URL     "https://midtermdev.github.io/immortal-fruit-fly"
 #define ANCHOR_EVERY_S 45          // stimulate+tick the on-chain core this often (gas!)

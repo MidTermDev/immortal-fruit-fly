@@ -31,20 +31,21 @@ export const CFG = {
   brainV1: "0x32D28e97b50f5978eb51d7608492CC7221b01f63",
   world: "0xD730E65Bdc1cBd40f720a36EeD71e2028Bf20EB4",
   arcade: "0x3dE4fe3535dd9E1CC17b6718B985593e3E463279",
-  registry: "0x0eeB0A675720306Ef6f426Bd8560c1288848f813",
-  // Block the registry was created in (tx 0x11caa6cc…f1991). Event scans never look before it; fly #1 was minted in
-  // 122000841 and the first bodies registered in 122000836, so a rounded-up value here would hide them for ever.
-  registryDeployBlock: 122000724,
-  // FlyCore: the per-fly 155-neuron compass core keyed by registry id (contracts/src/FlyCore.sol). Empty until it is
-  // deployed; the fly pages show the "On-chain core" figure only when this is a non-empty address. Pebbles anchor here.
-  core: "0x90835aceD9b2739658Ff94aBC7c0c45049ea49f3",
+  // FlyRegistryV3 (contracts/src/FlyRegistryV3.sol): life is paid in BNB (feed and resurrect are payable, nothing is
+  // burned as metabolism); mint and breed still burn $FLY. Every fly of v2 was migrated to it with the same id and owner.
+  registry: "0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53",
+  // Block the v3 registry was created in. Event scans never look before it; the migration re-minted every fly right
+  // after it, so a rounded-up value here would hide the first Minted/Migrated rows for ever.
+  registryDeployBlock: 122448689,
+  // The previous registry (v2), kept as history: the same flies lived there before the migration, and their record up
+  // to that block is on it. The site reads nothing from it any more; the docs link to it.
+  registryV2: "0x0eeB0A675720306Ef6f426Bd8560c1288848f813",
+  // FlyCore: the per-fly 155-neuron compass core keyed by registry id (contracts/src/FlyCore.sol), redeployed against
+  // the v3 registry (same code). The fly pages show the "On-chain core" figure only when this is a non-empty address.
+  // Pebbles anchor here.
+  core: "0x77F6066B2ab12072DCEFb7D9DB998944C4ec28C2",
   // Block FlyCore was deployed in (0 = unknown: event scans fall back to the registry's deploy block).
-  coreDeployBlock: 122089807,
-  // LifeFund (contracts/src/LifeFund.sol): anyone pays a little BNB to keep a fly alive; the operator's keeper then feeds
-  // the fly from the fund's own $FLY whenever it is running in a body and hungry. Feeding still burns $FLY on the registry.
-  lifeFund: "0xB0e5Bf6c12207C7AFbB2A8f794809E3f072d93F3",
-  // Block LifeFund was deployed in (tx 0x5b42acd4…c7b3); event scans of the fund never look before it.
-  lifeFundDeployBlock: 122376071,
+  coreDeployBlock: 122449461,
   bodies: { arena: "0x47005543c06246124480D196a275327325695BEd", doom: "0x642ebC7fD62a24406d8A86885F0131472E641c86", host: "0x4fC3E7D1fAD1A8E7FAC849DAa5BfF0C8333fe2a6", colony: "0x95187D9dBaF262aB3e1de52b71a20Ef171aEb3c5" },
   // The Colony (COLONY.md): a Minecraft world on the VPS where many flies live at once, each a whole brain. Its public
   // origin is fixed (DNS + nginx on the VPS), so the site prefers it to bodies(colony).uri; NEXT_PUBLIC_COLONY_URL
@@ -60,7 +61,9 @@ export const CFG = {
   // The canonical site: every absolute link new code builds starts here (the GitHub Pages export is a mirror).
   site: "https://www.immortalfly.app",
   // Element is the NFT marketplace that indexes BNB Chain collections (OpenSea does not list BSC).
-  market: { name: "Element", asset: "https://element.market/assets/bsc/0x0eeB0A675720306Ef6f426Bd8560c1288848f813", collection: "https://element.market/collections/immortal-fruit-flies-1" },
+  // Element's asset URL is by contract address, so it follows the v3 registry. The collection page's slug is only known
+  // once Element has indexed the new contract; until then the collection link is the contract's own asset root.
+  market: { name: "Element", asset: "https://element.market/assets/bsc/0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53", collection: "https://element.market/assets/bsc/0x69DA3239B69c0B7C9C063F105c4DDf008FFb8F53" },
   ipfsGateway: "https://gateway.pinata.cloud/ipfs/",
   liveFallback: process.env.NEXT_PUBLIC_LIVE_URL || "",
   // The brain host (brain/HOST_PROTOCOL.md) announces its public origin in bodies(host).uri, like the arena. For local
