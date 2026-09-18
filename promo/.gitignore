@@ -14,3 +14,4 @@ video/skills-lock.json
 video/*.log
 video/.agents/
 node_modules
+video/public/tour/
