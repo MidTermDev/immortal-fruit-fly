@@ -191,6 +191,16 @@ def accept_fly(fid):
         log(f'fly #{fid}: accept failed:', repr(e)[:160]); return False
 
 
+_keeper = {'addr': None, 'at': 0.0}
+def keeper_addr():
+    """The registry's keeper (lower-case), read once an hour; '' when the read fails."""
+    if time.time() - _keeper['at'] > 3600:
+        _keeper['at'] = time.time()
+        try: _keeper['addr'] = str(reg.c.functions.keeper().call()).lower()
+        except Exception as e: _keeper['addr'] = _keeper['addr'] or ''; log('keeper() read failed:', repr(e)[:80])
+    return _keeper['addr'] or ''
+
+
 def release_fly(fid):
     """release(id) with the Colony key: the fly is handed back to its owner, dormant but alive, and can be assigned again."""
     if not SEND: log(f'fly #{fid}: not releasing (COLONY_SEND=0)'); return False
@@ -360,6 +370,9 @@ async def deliver_drops(session, c):
     for drop in d.get('drops', []):
         pos = d.get('pos') or [0, 64, 0]; h = hashlib.sha256(str(drop['tx']).encode()).digest()
         ang = int.from_bytes(h[:4], 'big') / 2 ** 32 * 2 * math.pi; rad = 5 + 5 * int.from_bytes(h[4:8], 'big') / 2 ** 32
+        # the keeper's free top-ups are life support, not a game: they land at the fly's feet and are eaten at once. A feed anyone
+        # else pays for lands 5-10 blocks away and the fly has to smell its way there (fly #2 starved next to three of them on 17 Sep)
+        if keeper_addr() and str(drop.get('by', '')).lower() == keeper_addr(): rad = 0.8
         x, y, z = pos[0] + rad * math.cos(ang), pos[1] + 1.0, pos[2] + rad * math.sin(ang); n = int(drop.get('bread') or max(1, math.ceil(int(drop['seconds']) / BREAD_POINTS))); left = n; okc = 0
         while left > 0:
             k = min(64, left); r = await rcon_write(f'summon minecraft:item {x:.1f} {y:.1f} {z:.1f} {{Item:{{id:"minecraft:bread",count:{k}}}}}')
@@ -428,6 +441,13 @@ async def supervise(app):
                     continue
                 f = recs.get(fid)
                 if c['proc'].poll() is not None: children.pop(fid, None); log(f'fly #{fid}: brain gone, no longer wanted'); continue
+                # a brain we run but the scan did not select: before stopping it for what the record says, read that record from the chain
+                # itself. The scan may come from the index, up to a minute stale, and this body may have accepted the fly since (fly #2 was
+                # stopped as "released" 15 s after its accept on 18 Sep because the index still showed pending)
+                try: f = await asyncio.to_thread(reg.fly, fid)
+                except Exception as e: log(f'fly #{fid}: record re-read failed ({repr(e)[:80]}); keeping it this scan'); continue
+                if f['alive'] and str(f['body']).lower() == ADDR.lower() and fid not in sel['host'] and len(children) <= MAX_FLIES:
+                    sel['host'].append(fid); c['dead_since'] = (c['dead_since'] or time.time()) if c['health'].get('alive') is False else None; continue   # ours after all: the scan was stale
                 if f and f['alive'] and str(f['body']).lower() not in (ADDR.lower(), ZERO): await stop_child(c, f"the fly left for {f['body'][:10]}"); continue
                 if f and f['alive'] and str(f['body']).lower() == ZERO and c['health'].get('alive') is not False: await stop_child(c, 'the fly was released'); continue
                 if f and f['alive'] and str(f['body']).lower() == ADDR.lower(): await stop_child(c, 'over capacity: back to the queue'); continue

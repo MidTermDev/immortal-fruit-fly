@@ -336,6 +336,15 @@ def poll_chain():
             if f['pendingBody'].lower() == reg.address.lower():
                 instantiate_from_chain(); reg.accept(FLY_ID); log('accepted custody of fly #%d' % FLY_ID); f = reg.fly(FLY_ID)
             hosting = f['body'].lower() == reg.address.lower()
+            if hosting and f['alive'] and not world.alive and int(f['generation']) > int(world.generation):
+                # the chain's generation is past the world's: a resurrection happened where this body could not see the event (on the
+                # previous registry, before the migration; fly #1 sat dead in the arena for a day this way on 17-18 Sep while its record said
+                # alive). The world follows the record, like instantiate_remote: its energy is the record's, which already banks every feed,
+                # so food placed while it lay dead is cleared rather than counted twice.
+                with lock:
+                    world.resurrect(int(f['energy'])); world.generation = int(f['generation']); world.food = []
+                    applied({'kind': 'resurrect', 'generation': world.generation, 'energy': int(f['energy']), 'by': 'record', 'block': head, 'brain_step': brain.t})
+                log(f"resurrected per the record as generation {world.generation} with {f['energy']} s (the chain moved past this world's death)")
         chain_state['hosting'] = hosting; chain_state['alive_onchain'] = f['alive']
         if not hosting:
             chain_state['seen_block'] = head + 1; return
